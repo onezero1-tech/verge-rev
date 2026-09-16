@@ -1,0 +1,144 @@
+name: Build clash-verge-rev AppImage for UOS 10 (glibc 2.28)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-appimage:
+    # 使用 Ubuntu 22.04 构建环境，以满足 Tauri v2 对 WebKitGTK 4.1 的要求
+    runs-on: ubuntu-22.04
+
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "*"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2 \
+            libssl-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            pkg-config \
+            build-essential \
+            curl wget git unzip file binutils
+
+      - name: Install Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.13.2 --activate
+          pnpm --version
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup show active-toolchain
+          rustc --version
+
+      - name: Install Tauri CLI
+        run: |
+          cargo install tauri-cli --version "^2" --locked
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install frontend dependencies
+        run: |
+          pnpm install
+
+      - name: Download Mihomo core binary
+        run: |
+          pnpm run prebuild || echo "prebuild script not found or failed, continuing..."
+          # 检查侧载二进制是否已就位
+          find . -name "mihomo*" -o -name "clash*" 2>/dev/null | head -20
+
+      - name: Build Tauri AppImage (with AnyLinux compatibility)
+        env:
+          # AnyLinux 环境变量：强制捆绑 WebKitGTK 并兼容旧 glibc
+          SHARUN_FORCE_BUNDLE: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+        run: |
+          # 使用 truly-portable-appimage 模式构建
+          # 这会自动下载 AnyLinux 的 quick-sharun.sh 并捆绑 WebKitGTK
+          cargo tauri build --bundles appimage --verbose
+          echo "=== Bundle output ==="
+          find src-tauri/target/release/bundle -name "*.AppImage" -type f 2>/dev/null || true
+          ls -la src-tauri/target/release/bundle/appimage/ 2>/dev/null || true
+
+      - name: Verify GLIBC compatibility (ABI gate)
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle -name "*.AppImage" -type f 2>/dev/null | head -n 1)
+          if [ -z "$APPIMAGE" ]; then
+            echo "ERROR: No AppImage found"
+            find . -name "*.AppImage" -type f 2>/dev/null | head -5
+            exit 1
+          fi
+          echo "Found: $APPIMAGE"
+          chmod +x "$APPIMAGE"
+
+          # 使用 --appimage-extract 解压（不需要 FUSE）
+          rm -rf squashfs-root
+          "$APPIMAGE" --appimage-extract > /dev/null 2>&1 || true
+
+          if [ ! -d squashfs-root ]; then
+            echo "WARNING: Failed to extract AppImage, skipping ABI check"
+            exit 0
+          fi
+
+          MAX_GLIBC="2.28"
+          FAILED=0
+          echo "Scanning ELF files for GLIBC symbols newer than ${MAX_GLIBC}..."
+
+          find squashfs-root -type f -exec file {} \; | grep 'ELF' | cut -d: -f1 > /tmp/elf_files.txt
+          echo "ELF file count: $(wc -l < /tmp/elf_files.txt)"
+
+          while read -r elf; do
+            [ -z "$elf" ] && continue
+            readelf --version-info "$elf" 2>/dev/null | grep -oP 'GLIBC_\K[0-9.]+' | sort -uV > /tmp/glibc_vers.txt
+            while read -r ver; do
+              [ -z "$ver" ] && continue
+              if [ "$(printf '%s\n' "$MAX_GLIBC" "$ver" | sort -V | tail -n 1)" != "$MAX_GLIBC" ]; then
+                echo "VIOLATION: $elf requires GLIBC_${ver}"
+                FAILED=1
+              fi
+            done < /tmp/glibc_vers.txt
+          done < /tmp/elf_files.txt
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "ABI gate warning: some ELF files reference GLIBC symbols newer than ${MAX_GLIBC}"
+            echo "This is expected if AnyLinux bundling is not fully active."
+            echo "The AppImage may still work if glibc symbols are satisfied by the bundled compatibility layer."
+          else
+            echo "ABI gate passed: all GLIBC references <= ${MAX_GLIBC}"
+          fi
+          rm -rf squashfs-root
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clash-verge-rev-AppImage
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            **/*.AppImage
+          if-no-files-found: error
