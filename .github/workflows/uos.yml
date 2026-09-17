@@ -66,11 +66,17 @@ jobs:
         run: |
           pnpm install
 
-      - name: Download Mihomo core binary
+      - name: Download sidecars and resources (prebuild)
         run: |
-          pnpm run prebuild || echo "prebuild script not found or failed, continuing..."
-          # 检查侧载二进制是否已就位
-          find . -name "mihomo*" -o -name "clash*" 2>/dev/null | head -20
+          set -e
+          # CI 环境必须显式传入 target triple
+          pnpm run prebuild -- x86_64-unknown-linux-gnu
+
+          echo "=== src-tauri/sidecar/ ==="
+          ls -la src-tauri/sidecar/
+
+          echo "=== src-tauri/resources/ ==="
+          ls -la src-tauri/resources/ 2>/dev/null || true
 
       - name: Build Tauri AppImage (with AnyLinux compatibility)
         env:
