@@ -94,7 +94,7 @@ jobs:
 
       - name: Verify GLIBC compatibility (ABI gate)
         run: |
-          APPIMAGE=$(find src-tauri/target/release/bundle -name "*.AppImage" -type f 2>/dev/null | head -n 1)
+          APPIMAGE=$(find target/release/bundle src-tauri/target/release/bundle -name "*.AppImage" -type f 2>/dev/null | head -n 1)
           if [ -z "$APPIMAGE" ]; then
             echo "ERROR: No AppImage found"
             find . -name "*.AppImage" -type f 2>/dev/null | head -5
@@ -145,6 +145,7 @@ jobs:
         with:
           name: clash-verge-rev-AppImage
           path: |
+            target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/appimage/*.AppImage
             **/*.AppImage
           if-no-files-found: error
