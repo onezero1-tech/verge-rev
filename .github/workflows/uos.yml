@@ -70,8 +70,8 @@ jobs:
         run: |
           set -e
           # CI 环境必须显式传入 target triple
-          pnpm run prebuild -- x86_64-unknown-linux-gnu
-
+          node scripts/prebuild.mjs x86_64-unknown-linux-gnu
+          
           echo "=== src-tauri/sidecar/ ==="
           ls -la src-tauri/sidecar/
 
