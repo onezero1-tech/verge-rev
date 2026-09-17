@@ -8,83 +8,185 @@ on:
 
 jobs:
   build-linglong:
-    runs-on: ubuntu-24.04
-    container:
-      # 使用一个包含玲珑构建工具的基础镜像
-      image: ghcr.io/linyaps/linglong-builder:latest
-      options: --user root
+    runs-on: ubuntu-22.04
+
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "*"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
 
       - name: Install system dependencies
         run: |
-          apt-get update
-          apt-get install -y \
+          sudo apt-get update
+          sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
+            libfuse2 \
             libssl-dev \
             libgtk-3-dev \
+            libxdo-dev \
             pkg-config \
             build-essential \
             curl wget git unzip file binutils
 
-      - name: Install Node.js and pnpm
+      - name: Install Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
         run: |
-          # 安装 Node.js 和 pnpm 的步骤...
-          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-          apt-get install -y nodejs
           corepack enable
           corepack prepare pnpm@9.13.2 --activate
+          pnpm --version
 
       - name: Install Rust toolchain
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           export PATH="$HOME/.cargo/bin:$PATH"
+          rustup show active-toolchain
 
       - name: Install Tauri CLI
         run: |
           cargo install tauri-cli --version "^2" --locked
 
-      - name: Prepare sidecars and resources
+      - name: Install frontend dependencies
         run: |
-          # 下载 mihomo 和 clash-verge-service 等 sidecar 文件
-          # 使用之前讨论过的 prebuild 脚本
           pnpm install
+
+      - name: Download sidecars and resources (prebuild)
+        run: |
+          set -e
           node scripts/prebuild.mjs x86_64-unknown-linux-gnu
+          echo "=== src-tauri/sidecar/ ==="
+          ls -la src-tauri/sidecar/
+          echo "=== src-tauri/resources/ ==="
+          ls -la src-tauri/resources/ 2>/dev/null || true
 
-      - name: Build Tauri AppImage
+      - name: Build Tauri application (no bundle)
         run: |
-          cargo tauri build --bundles appimage --no-sign
+          cargo tauri build --no-bundle --verbose
+          echo "=== Build output ==="
+          ls -la target/release/
+          file target/release/clash-verge
 
-      - name: Convert AppImage to Linglong
+      - name: Prepare Linglong project
         run: |
-          # 使用 ll-appimage-convert 工具进行转换
-          # 假设 AppImage 文件位于 target/release/bundle/appimage/
-          APPIMAGE=$(find target/release/bundle/appimage -name "*.AppImage" -type f | head -n 1)
-          if [ -z "$APPIMAGE" ]; then
-            echo "ERROR: No AppImage found"
-            exit 1
+          set -e
+          mkdir -p linglong-project
+
+          # 将 Tauri 构建产物复制到玲珑工程目录
+          cp target/release/clash-verge linglong-project/clash-verge
+          chmod +x linglong-project/clash-verge
+
+          # 复制 sidecar 和资源文件
+          cp -r src-tauri/sidecar linglong-project/sidecar 2>/dev/null || true
+          cp -r src-tauri/resources linglong-project/resources 2>/dev/null || true
+
+          # 复制可能需要的额外文件
+          if [ -d "src-tauri/icons" ]; then
+            cp -r src-tauri/icons linglong-project/icons
           fi
-          
-          ll-appimage-convert convert \
-            --file "$APPIMAGE" \
-            --name "io.github.clash-verge-rev" \
-            --id "io.github.clash-verge-rev" \
-            --version "2.5.4" \
-            --description "Clash Verge Rev for UOS" \
-            -b
-          # -b 选项表示转换后立即构建，生成 .layer 或 .uab 文件
+
+          echo "=== linglong-project contents ==="
+          find linglong-project -type f | head -30
+
+      - name: Generate linglong.yaml
+        run: |
+          cat > linglong-project/linglong.yaml << 'YAML_EOF'
+          version: '1'
+
+          package:
+            id: io.github.clash-verge-rev
+            name: Clash Verge Rev
+            version: 2.5.4.0
+            kind: app
+            description: |
+              Clash Verge Rev - A Clash Meta GUI based on Tauri
+            architecture: amd64
+
+          command:
+            - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+
+          base: org.deepin.base/25.2.0
+          runtime: org.deepin.runtime.gtk4/25.2.1.0
+
+          build: |
+            SOURCES="linglong/sources"
+            export PATH=$PATH:/usr/libexec/linglong/builder/helper
+
+            # 将 Tauri 构建产物安装到玲珑容器对应目录
+            cp -r clash-verge $PREFIX
+            cp -r sidecar $PREFIX 2>/dev/null || true
+            cp -r resources $PREFIX 2>/dev/null || true
+            cp -r icons $PREFIX 2>/dev/null || true
+
+            # 确保可执行权限
+            chmod +x $PREFIX/clash-verge
+
+            # 创建启动脚本
+            mkdir -p $PREFIX/bin
+            cat > $PREFIX/AppRun.sh << 'APP_RUN_EOF'
+          #!/bin/bash
+          export FLUTTER_LINUX_RENDERER=software
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          # 将 sidecar 目录加入 PATH，供 clash-verge 查找内核和服务
+          export PATH="$DIR/sidecar:$PATH"
+
+          exec "$DIR/clash-verge" "$@"
+          APP_RUN_EOF
+            chmod +x $PREFIX/AppRun.sh
+
+            # 创建 desktop 文件
+            mkdir -p $PREFIX/share/applications
+            cat > $PREFIX/share/applications/io.github.clash-verge-rev.desktop << 'DESKTOP_EOF'
+          [Desktop Entry]
+          Name=Clash Verge Rev
+          Comment=Clash Meta GUI
+          Exec=/opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          Icon=io.github.clash-verge-rev
+          Type=Application
+          Categories=Network;
+          Terminal=false
+          DESKTOP_EOF
+
+            # 复制图标（如果存在）
+            mkdir -p $PREFIX/share/icons/hicolor/256x256/apps
+            if [ -f icons/128x128.png ]; then
+              cp icons/128x128.png $PREFIX/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
+            elif [ -f icons/icon.png ]; then
+              cp icons/icon.png $PREFIX/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
+            fi
+
+            echo "Linglong build script completed."
+          YAML_EOF
+
+          echo "=== linglong.yaml ==="
+          cat linglong-project/linglong.yaml
+
+      - name: Build Linglong package
+        uses: myml/linglong-builder-action@main
+        with:
+          working-directory: './linglong-project'
 
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
         with:
           name: clash-verge-rev-linglong
           path: |
-            **/*.layer
-            **/*.uab
+            linglong-project/*.layer
+            linglong-project/*.uab
           if-no-files-found: error
