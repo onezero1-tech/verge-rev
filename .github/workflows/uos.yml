@@ -79,36 +79,43 @@ jobs:
           ls -la target/release/
           file target/release/clash-verge
 
-      - name: Prepare Linglong project sources
+      - name: Prepare Linglong project
         run: |
           set -e
           mkdir -p linglong-project
 
+          # 1. 复制 Tauri 编译产物
           cp target/release/clash-verge linglong-project/clash-verge
           chmod +x linglong-project/clash-verge
 
+          # 2. 复制 sidecar 和资源文件
           cp -r src-tauri/sidecar linglong-project/sidecar 2>/dev/null || true
           cp -r src-tauri/resources linglong-project/resources 2>/dev/null || true
 
+          # 3. 复制图标
           if [ -d "src-tauri/icons" ]; then
             cp -r src-tauri/icons linglong-project/icons
           fi
 
-          # 生成 AppRun.sh（独立生成，避免嵌套 heredoc）
+          # 4. 生成 AppRun.sh 启动脚本
           cat > linglong-project/AppRun.sh << 'EOF'
           #!/bin/bash
+          # 禁用 WebKitGTK 合成和沙箱，以兼容旧系统
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 
           DIR="$(cd "$(dirname "$0")" && pwd)"
+          # 将 sidecar 目录加入 PATH，供主程序查找内核和服务
           export PATH="$DIR/sidecar:$PATH"
 
           exec "$DIR/clash-verge" "$@"
           EOF
           chmod +x linglong-project/AppRun.sh
 
-          # 生成 desktop 文件
+          # 5. 准备 desktop 文件和图标目录
           mkdir -p linglong-project/share/applications
+          mkdir -p linglong-project/share/icons/hicolor/256x256/apps
+
           cat > linglong-project/share/applications/io.github.clash-verge-rev.desktop << 'EOF'
           [Desktop Entry]
           Name=Clash Verge Rev
@@ -120,8 +127,7 @@ jobs:
           Terminal=false
           EOF
 
-          # 复制图标
-          mkdir -p linglong-project/share/icons/hicolor/256x256/apps
+          # 6. 复制图标文件（如果存在）
           if [ -f linglong-project/icons/128x128.png ]; then
             cp linglong-project/icons/128x128.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
           elif [ -f linglong-project/icons/icon.png ]; then
@@ -133,7 +139,7 @@ jobs:
 
       - name: Generate linglong.yaml
         run: |
-          cat > linglong-project/linglong.yaml << 'EOF'
+          cat > linglong-project/linglong.yaml << 'YAML_EOF'
           version: '1'
 
           package:
@@ -152,16 +158,18 @@ jobs:
           runtime: org.deepin.runtime.gtk4/25.2.1.0
 
           build: |
-            cp -r clash-verge $PREFIX
-            cp -r AppRun.sh $PREFIX
-            cp -r sidecar $PREFIX 2>/dev/null || true
-            cp -r resources $PREFIX 2>/dev/null || true
-            cp -r icons $PREFIX 2>/dev/null || true
-            cp -r share $PREFIX
+            # 将准备阶段的所有文件复制到玲珑容器的安装前缀
+            cp -r clash-verge $PREFIX/
+            cp -r AppRun.sh $PREFIX/
+            cp -r sidecar $PREFIX/ 2>/dev/null || true
+            cp -r resources $PREFIX/ 2>/dev/null || true
+            cp -r icons $PREFIX/ 2>/dev/null || true
+            cp -r share $PREFIX/
 
+            # 确保可执行权限
             chmod +x $PREFIX/clash-verge
             chmod +x $PREFIX/AppRun.sh
-          EOF
+          YAML_EOF
 
           echo "=== linglong.yaml ==="
           cat linglong-project/linglong.yaml
