@@ -84,15 +84,12 @@ jobs:
           set -e
           mkdir -p linglong-project
 
-          # 将 Tauri 构建产物复制到玲珑工程目录
           cp target/release/clash-verge linglong-project/clash-verge
           chmod +x linglong-project/clash-verge
 
-          # 复制 sidecar 和资源文件
           cp -r src-tauri/sidecar linglong-project/sidecar 2>/dev/null || true
           cp -r src-tauri/resources linglong-project/resources 2>/dev/null || true
 
-          # 复制可能需要的额外文件
           if [ -d "src-tauri/icons" ]; then
             cp -r src-tauri/icons linglong-project/icons
           fi
@@ -124,16 +121,13 @@ jobs:
             SOURCES="linglong/sources"
             export PATH=$PATH:/usr/libexec/linglong/builder/helper
 
-            # 将 Tauri 构建产物安装到玲珑容器对应目录
             cp -r clash-verge $PREFIX
             cp -r sidecar $PREFIX 2>/dev/null || true
             cp -r resources $PREFIX 2>/dev/null || true
             cp -r icons $PREFIX 2>/dev/null || true
 
-            # 确保可执行权限
             chmod +x $PREFIX/clash-verge
 
-            # 创建启动脚本
             mkdir -p $PREFIX/bin
             cat > $PREFIX/AppRun.sh << 'APP_RUN_EOF'
           #!/bin/bash
@@ -142,15 +136,12 @@ jobs:
           export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 
           DIR="$(cd "$(dirname "$0")" && pwd)"
-
-          # 将 sidecar 目录加入 PATH，供 clash-verge 查找内核和服务
           export PATH="$DIR/sidecar:$PATH"
 
           exec "$DIR/clash-verge" "$@"
           APP_RUN_EOF
             chmod +x $PREFIX/AppRun.sh
 
-            # 创建 desktop 文件
             mkdir -p $PREFIX/share/applications
             cat > $PREFIX/share/applications/io.github.clash-verge-rev.desktop << 'DESKTOP_EOF'
           [Desktop Entry]
@@ -163,7 +154,6 @@ jobs:
           Terminal=false
           DESKTOP_EOF
 
-            # 复制图标（如果存在）
             mkdir -p $PREFIX/share/icons/hicolor/256x256/apps
             if [ -f icons/128x128.png ]; then
               cp icons/128x128.png $PREFIX/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
