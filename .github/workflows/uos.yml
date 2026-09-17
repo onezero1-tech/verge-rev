@@ -87,7 +87,7 @@ jobs:
         run: |
           # 使用 truly-portable-appimage 模式构建
           # 这会自动下载 AnyLinux 的 quick-sharun.sh 并捆绑 WebKitGTK
-          cargo tauri build --bundles appimage --verbose
+          cargo tauri build --bundles appimage --verbose --no-sign
           echo "=== Bundle output ==="
           find src-tauri/target/release/bundle -name "*.AppImage" -type f 2>/dev/null || true
           ls -la src-tauri/target/release/bundle/appimage/ 2>/dev/null || true
