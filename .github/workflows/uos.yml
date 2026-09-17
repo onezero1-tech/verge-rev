@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-linglong:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     env:
       GIT_CONFIG_COUNT: "1"
@@ -79,7 +79,7 @@ jobs:
           ls -la target/release/
           file target/release/clash-verge
 
-      - name: Prepare Linglong project
+      - name: Prepare Linglong project sources
         run: |
           set -e
           mkdir -p linglong-project
@@ -94,12 +94,46 @@ jobs:
             cp -r src-tauri/icons linglong-project/icons
           fi
 
+          # 生成 AppRun.sh（独立生成，避免嵌套 heredoc）
+          cat > linglong-project/AppRun.sh << 'EOF'
+          #!/bin/bash
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export PATH="$DIR/sidecar:$PATH"
+
+          exec "$DIR/clash-verge" "$@"
+          EOF
+          chmod +x linglong-project/AppRun.sh
+
+          # 生成 desktop 文件
+          mkdir -p linglong-project/share/applications
+          cat > linglong-project/share/applications/io.github.clash-verge-rev.desktop << 'EOF'
+          [Desktop Entry]
+          Name=Clash Verge Rev
+          Comment=Clash Meta GUI
+          Exec=/opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          Icon=io.github.clash-verge-rev
+          Type=Application
+          Categories=Network;
+          Terminal=false
+          EOF
+
+          # 复制图标
+          mkdir -p linglong-project/share/icons/hicolor/256x256/apps
+          if [ -f linglong-project/icons/128x128.png ]; then
+            cp linglong-project/icons/128x128.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
+          elif [ -f linglong-project/icons/icon.png ]; then
+            cp linglong-project/icons/icon.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
+          fi
+
           echo "=== linglong-project contents ==="
-          find linglong-project -type f | head -30
+          find linglong-project -type f | head -40
 
       - name: Generate linglong.yaml
         run: |
-          cat > linglong-project/linglong.yaml << 'YAML_EOF'
+          cat > linglong-project/linglong.yaml << 'EOF'
           version: '1'
 
           package:
@@ -118,51 +152,16 @@ jobs:
           runtime: org.deepin.runtime.gtk4/25.2.1.0
 
           build: |
-            SOURCES="linglong/sources"
-            export PATH=$PATH:/usr/libexec/linglong/builder/helper
-
             cp -r clash-verge $PREFIX
+            cp -r AppRun.sh $PREFIX
             cp -r sidecar $PREFIX 2>/dev/null || true
             cp -r resources $PREFIX 2>/dev/null || true
             cp -r icons $PREFIX 2>/dev/null || true
+            cp -r share $PREFIX
 
             chmod +x $PREFIX/clash-verge
-
-            mkdir -p $PREFIX/bin
-            cat > $PREFIX/AppRun.sh << 'APP_RUN_EOF'
-          #!/bin/bash
-          export FLUTTER_LINUX_RENDERER=software
-          export WEBKIT_DISABLE_COMPOSITING_MODE=1
-          export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          export PATH="$DIR/sidecar:$PATH"
-
-          exec "$DIR/clash-verge" "$@"
-          APP_RUN_EOF
             chmod +x $PREFIX/AppRun.sh
-
-            mkdir -p $PREFIX/share/applications
-            cat > $PREFIX/share/applications/io.github.clash-verge-rev.desktop << 'DESKTOP_EOF'
-          [Desktop Entry]
-          Name=Clash Verge Rev
-          Comment=Clash Meta GUI
-          Exec=/opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          Icon=io.github.clash-verge-rev
-          Type=Application
-          Categories=Network;
-          Terminal=false
-          DESKTOP_EOF
-
-            mkdir -p $PREFIX/share/icons/hicolor/256x256/apps
-            if [ -f icons/128x128.png ]; then
-              cp icons/128x128.png $PREFIX/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
-            elif [ -f icons/icon.png ]; then
-              cp icons/icon.png $PREFIX/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
-            fi
-
-            echo "Linglong build script completed."
-          YAML_EOF
+          EOF
 
           echo "=== linglong.yaml ==="
           cat linglong-project/linglong.yaml
@@ -170,7 +169,8 @@ jobs:
       - name: Build Linglong package
         uses: myml/linglong-builder-action@main
         with:
-          working-directory: './linglong-project'
+          file: 'linglong-project/linglong.yaml'
+          format: 'layer'
 
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
