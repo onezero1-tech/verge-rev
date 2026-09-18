@@ -198,26 +198,27 @@ jobs:
           echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
           sudo apt-get install -y linglong-builder linglong-box linglong-bin
-          # 2. 在 CI 虚拟环境下初始化本地 D-Bus 环回
-          sudo mkdir -p /var/run/dbus
-          sudo dbus-daemon --system --fork || true
+          # 2. 核心修复：建立规范的系统 D-Bus 环境并启动总线
+          sudo mkdir -p /var/run/dbus /var/lib/linglong /root/linglong /var/lib/linglong/repo
+          sudo dbus-daemon --system --fork --nopidfile || true
           
-          # 3. 强制创建玲珑本地运行目录
-          sudo mkdir -p /var/lib/linglong /root/linglong /var/lib/linglong/repo
-          
-          echo "=== 正在全盘检索新版玲珑服务进程名并手动后台拉起 ==="
-          # 💡 核心修复：通过 dpkg 实时检索当前安装的玲珑包管理器核心服务名（兼容新旧各版本命名）
-          SERVICE_PATH=$(dpkg -L linglong-bin | grep -E '(package-manager|daemon|ll-pm|linglong-pm)' | head -n 1)
-          
-          if [ -n "$SERVICE_PATH" ] && [ -f "$SERVICE_PATH" ]; then
-            echo "精确锁定玲珑核心服务：$SERVICE_PATH，正在拉起后台..."
-            sudo "$SERVICE_PATH" > /tmp/linglong-daemon.log 2>&1 &
-          else
-            echo "未通过规则检索到，尝试备用常见新版进程名..."
-            sudo /usr/libexec/linglong/ll-package-manager > /tmp/linglong-daemon.log 2>&1 &
-            sudo /usr/lib/linglong/ll-package-manager >> /tmp/linglong-daemon.log 2>&1 &
-            sudo ll-package-manager >> /tmp/linglong-daemon.log 2>&1 &
+          echo "=== 配置 D-Bus 自动激活机制 ==="
+          # 3. 核心修复：将玲珑的 D-Bus 配置文件软链接或复制到系统 D-Bus 目录下
+          # 这样 ll-builder 发起请求时，D-Bus 总线会自动按需规范地拉起 /usr/libexec/linglong/ll-package-manager
+          if [ -d "/usr/share/dbus-1/system.d" ]; then
+            sudo cp /usr/share/dbus-1/system.d/org.deepin.linglong.PackageManager.conf /etc/dbus-1/system.d/ 2>/dev/null || true
           fi
+          if [ -d "/usr/share/dbus-1/system-services" ]; then
+            sudo cp /usr/share/dbus-1/system-services/org.deepin.linglong.PackageManager.service /usr/share/dbus-1/system-services/ 2>/dev/null || true
+          fi
+
+          # 4. 重新加载系统 D-Bus 配置，使其立即识别并接管玲珑服务
+          sudo dbus-send --system --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig || true
+          
+          # 5. 触发测试：通过标准客户端请求强制唤醒该服务
+          echo "=== 正在尝试通过 D-Bus 唤醒并初始化玲珑包管理器 ==="
+          sudo dbus-send --system --print-reply --dest=org.deepin.linglong.PackageManager /org/deepin/linglong/PackageManager1 org.freedesktop.DBus.Peer.Ping || true
+          
           
           # 留出 5 秒钟给玲珑子系统初始化云端连接
           sleep 5
