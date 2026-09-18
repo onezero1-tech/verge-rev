@@ -8,7 +8,12 @@ on:
 
 jobs:
   build-linglong:
-    runs-on: ubuntu-24.04  # 或 ubuntu-22.04，但24.04是玲珑官方明确支持的
+    runs-on: ubuntu-24.04
+    container:
+      # 使用包含 deepin base 缓存的社区镜像，避免手动安装和网络超时
+      # 如果此镜像不可用，请尝试 ghcr.io/jacklau1222/deepin-base:latest
+      image: ghcr.io/jacklau1222/deepin-base:latest
+      options: --user root
 
     env:
       GIT_CONFIG_COUNT: "1"
@@ -21,10 +26,11 @@ jobs:
         with:
           submodules: 'recursive'
 
+      # 以下系统依赖仍需安装，用于编译 Tauri 应用
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
@@ -56,12 +62,10 @@ jobs:
           rustup show active-toolchain
 
       - name: Install Tauri CLI
-        run: |
-          cargo install tauri-cli --version "^2" --locked
+        run: cargo install tauri-cli --version "^2" --locked
 
       - name: Install frontend dependencies
-        run: |
-          pnpm install
+        run: pnpm install
 
       - name: Download sidecars and resources (prebuild)
         run: |
@@ -83,46 +87,27 @@ jobs:
         run: |
           set -e
           mkdir -p linglong-project
-
-          # 1. 复制 Tauri 编译产物
           cp target/release/clash-verge linglong-project/clash-verge
           chmod +x linglong-project/clash-verge
-
-          # 2. 复制 sidecar 和资源文件
           cp -r src-tauri/sidecar linglong-project/sidecar 2>/dev/null || true
           cp -r src-tauri/resources linglong-project/resources 2>/dev/null || true
-
-          # 3. 复制图标
           if [ -d "src-tauri/icons" ]; then
             cp -r src-tauri/icons linglong-project/icons
           fi
-
-          # 4. 生成 AppRun.sh 启动脚本
+          # 生成 AppRun.sh 启动脚本
           cat > linglong-project/AppRun.sh << 'EOF'
           #!/bin/bash
-          # 禁用 WebKitGTK 合成和沙箱，以兼容旧系统
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-          
-          # 💡 针对网络解析的修复：
-          # 很多 Linux 发行版在沙箱中请求网络时，GIO/WebKitGTK 会寻找本地的域名解析器。
-          # 强制指定后端使用标准代理或确保系统的 resolv.conf 被软链接（玲珑默认会挂载）
           export GIO_LAUNCHED_DESKTOP_FILE_PID=$$
-          
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          # 将 sidecar 目录加入 PATH，供主程序查找内核和服务
           export PATH="$DIR/sidecar:$PATH"
-          # 确保 sidecar 运行权限
-          chmod +x "$DIR/sidecar"/* 2>/dev/null || true          
-
+          chmod +x "$DIR/sidecar"/* 2>/dev/null || true
           exec "$DIR/clash-verge" "$@"
           EOF
           chmod +x linglong-project/AppRun.sh
-
-          # 5. 准备 desktop 文件和图标目录
           mkdir -p linglong-project/share/applications
           mkdir -p linglong-project/share/icons/hicolor/256x256/apps
-
           cat > linglong-project/share/applications/io.github.clash-verge-rev.desktop << 'EOF'
           [Desktop Entry]
           Name=Clash Verge Rev
@@ -133,14 +118,11 @@ jobs:
           Categories=Network;
           Terminal=false
           EOF
-
-          # 6. 复制图标文件（如果存在）
           if [ -f linglong-project/icons/128x128.png ]; then
             cp linglong-project/icons/128x128.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
           elif [ -f linglong-project/icons/icon.png ]; then
             cp linglong-project/icons/icon.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
           fi
-
           echo "=== linglong-project contents ==="
           find linglong-project -type f | head -40
 
@@ -148,7 +130,6 @@ jobs:
         run: |
           cat > linglong-project/linglong.yaml << 'YAML_EOF'
           version: '1'
-
           package:
             id: io.github.clash-verge-rev
             name: Clash Verge Rev
@@ -156,103 +137,37 @@ jobs:
             kind: app
             description: |
               Clash Verge Rev - A Clash Meta GUI based on Tauri
-            architecture: x86_64  # 明确使用x86_64，玲珑标准架构名
-            
-          # 💡 核心修改：明确声明沙箱的权限策略，允许网络通信和本地端口绑定
+            architecture: x86_64
           permissions:
             - network
             - local_socket
-
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-
-          # 关键：根据玲珑文档，基础环境选择deepin base，运行时选择GTK4环境
           base: org.deepin.base/23.0.0
-          runtime: org.deepin.runtime.gtk4/23.0.0  # 如果此runtime不存在，可尝试org.deepin.runtime/23.0.1
-
-          # 应用构建规则（此处我们只是复制文件，无需复杂编译）
+          runtime: org.deepin.runtime.gtk4/23.0.0
           build: |
-            # 将准备阶段的所有文件复制到玲珑容器的安装前缀
             cp -r clash-verge $PREFIX/
             cp -r AppRun.sh $PREFIX/
             cp -r sidecar $PREFIX/ 2>/dev/null || true
             cp -r resources $PREFIX/ 2>/dev/null || true
             cp -r icons $PREFIX/ 2>/dev/null || true
             cp -r share $PREFIX/
-
-            # 确保可执行权限
             chmod +x $PREFIX/clash-verge
             chmod +x $PREFIX/AppRun.sh
-            # 确保 sidecar 目录下的内核文件在沙箱内也有执行权限
             if [ -d "$PREFIX/sidecar" ]; then
               chmod +x $PREFIX/sidecar/* 2>/dev/null || true
-            fi            
+            fi
           YAML_EOF
-
           echo "=== linglong.yaml ==="
           cat linglong-project/linglong.yaml
 
-      - name: Install Linglong toolchain
-        run: |
-          # 添加玲珑官方仓库源（针对Ubuntu 24.04）
-          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
-          sudo apt-get update
-          sudo apt-get install -y linglong-builder linglong-box linglong-bin
-          # 💡 核心修复：在 CI 环境中强制启用并启动玲珑相关的 D-Bus 和后台服务
-          sudo systemctl unmask org.deepin.linglong.PackageManager.service || true
-          sudo systemctl start org.deepin.linglong.PackageManager.service || true
-          
-          # 刷新并初始化本地玲珑仓库缓存
-          ll-builder repo show || true
-          
-      - name: Debug and start linglong package manager
-        run: |
-          set -x
-          # 查看服务单元定义（确认 ExecStart 用的二进制路径）
-          cat /usr/lib/systemd/system/org.deepin.linglong.PackageManager.service || true
-
-          # 确保 dbus 系统总线在运行
-          sudo systemctl start dbus.service || true
-
-          # 确保 daemon 的数据目录权限正确
-          sudo mkdir -p /var/lib/linglong /var/cache/linglong
-          sudo chown -R deepin-linglong:deepin-linglong /var/lib/linglong /var/cache/linglong || true
-
-          # 尝试通过 systemd 直接启动（绕过 D-Bus 按需激活）
-          sudo systemctl start org.deepin.linglong.PackageManager.service || true
-          sleep 5
-          systemctl is-active org.deepin.linglong.PackageManager.service || true
-          sudo journalctl -u org.deepin.linglong.PackageManager --no-pager -n 50 || true
-
-          # 验证 daemon 是否已注册到系统总线
-          busctl list --no-pager | grep -i linglong || true
-
-      - name: Fallback - launch package manager daemon manually
-        run: |
-          BIN=$(grep -m1 '^ExecStart' /usr/lib/systemd/system/org.deepin.linglong.PackageManager.service | awk '{print $1}' | cut -d= -f2)
-          echo "daemon binary: $BIN"
-          # 用专用用户身份启动，挂到后台
-          sudo nohup runuser -u deepin-linglong -- "$BIN" >/tmp/ll-pm.log 2>&1 &
-          sleep 8
-          echo "=== busctl ==="
-          busctl list --no-pager | grep -i linglong || true
-          echo "=== daemon log ==="
-          cat /tmp/ll-pm.log || true
-          
-          
-      - name: List remote base/runtime versions
-        run: |
-          sudo ll-cli search --type=base org.deepin.base || true
-          sudo ll-cli search --type=runtime org.deepin.runtime || true
-
+      # 直接使用镜像中已安装的 ll-builder，无需再手动安装玲珑工具链
       - name: Build Linglong package
         run: |
           cd linglong-project
-          sudo ll-builder build
-          sudo ll-builder export --layer
-          sudo chown -R $USER:$USER linglong-project/*.layer 2>/dev/null || true
+          ll-builder build
+          ll-builder export --layer
           ls -la *.layer
-
 
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
