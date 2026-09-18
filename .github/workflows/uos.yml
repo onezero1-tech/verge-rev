@@ -179,7 +179,7 @@ jobs:
       - name: Install Linglong toolchain
         run: |
           # 添加玲珑官方仓库源（针对Ubuntu 24.04）
-          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/xUbuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
           sudo apt-get install -y linglong-builder linglong-box linglong-bin
 
