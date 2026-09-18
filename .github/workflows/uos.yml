@@ -103,10 +103,17 @@ jobs:
           # 禁用 WebKitGTK 合成和沙箱，以兼容旧系统
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-
+          
+          # 💡 针对网络解析的修复：
+          # 很多 Linux 发行版在沙箱中请求网络时，GIO/WebKitGTK 会寻找本地的域名解析器。
+          # 强制指定后端使用标准代理或确保系统的 resolv.conf 被软链接（玲珑默认会挂载）
+          export GIO_LAUNCHED_DESKTOP_FILE_PID=$$
+          
           DIR="$(cd "$(dirname "$0")" && pwd)"
           # 将 sidecar 目录加入 PATH，供主程序查找内核和服务
           export PATH="$DIR/sidecar:$PATH"
+          # 确保 sidecar 运行权限
+          chmod +x "$DIR/sidecar"/* 2>/dev/null || true          
 
           exec "$DIR/clash-verge" "$@"
           EOF
@@ -155,6 +162,11 @@ jobs:
             description: |
               Clash Verge Rev - A Clash Meta GUI based on Tauri
             architecture: x86_64  # 明确使用x86_64，玲珑标准架构名
+            
+          # 💡 核心修改：明确声明沙箱的权限策略，允许网络通信和本地端口绑定
+          permissions:
+            - network
+            - local_socket
 
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
@@ -176,6 +188,10 @@ jobs:
             # 确保可执行权限
             chmod +x $PREFIX/clash-verge
             chmod +x $PREFIX/AppRun.sh
+            # 确保 sidecar 目录下的内核文件在沙箱内也有执行权限
+            if [ -d "$PREFIX/sidecar" ]; then
+              chmod +x $PREFIX/sidecar/* 2>/dev/null || true
+            fi            
           YAML_EOF
 
           echo "=== linglong.yaml ==="
