@@ -198,9 +198,23 @@ jobs:
           echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
           sudo apt-get install -y linglong-builder linglong-box linglong-bin
-          # 💡 核心修复：在 CI 环境中强制启用并启动玲珑相关的 D-Bus 和后台服务
-          sudo systemctl unmask org.deepin.linglong.PackageManager.service || true
-          sudo systemctl start org.deepin.linglong.PackageManager.service || true
+          # 2. 绕过 systemctl：在虚拟环境后台直接启动 D-Bus 并手动常驻运行玲珑服务进程
+          sudo mkdir -p /var/run/dbus
+          sudo dbus-daemon --system --fork || true
+          
+          echo "=== 尝试直接手动后台拉起玲珑包管理器进程 ==="
+          # 玲珑包管理器的绝对路径通常在 /usr/libexec/ 或 /usr/lib/linglong/
+          if [ -f "/usr/libexec/linglong/linglong-package-manager" ]; then
+            sudo /usr/libexec/linglong/linglong-package-manager &
+          elif [ -f "/usr/lib/linglong/linglong-package-manager" ]; then
+            sudo /usr/lib/linglong/linglong-package-manager &
+          else
+            # 兼容其他路径
+            sudo find /usr -name "linglong-package-manager" -exec {} & \; || true
+          fi
+          
+          # 给进程启动留出 3 秒响应时间
+          sleep 3
           
           # 刷新并初始化本地玲珑仓库缓存
           ll-builder repo show || true
