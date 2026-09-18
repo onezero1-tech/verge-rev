@@ -167,8 +167,8 @@ jobs:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
 
           # 关键：根据玲珑文档，基础环境选择deepin base，运行时选择GTK4环境
-          base: org.deepin.base/23.1.0
-          runtime: org.deepin.runtime.gtk4/23.0.1  # 如果此runtime不存在，可尝试org.deepin.runtime/23.0.1
+          base: org.deepin.base/23.0.0
+          runtime: org.deepin.runtime.gtk4/23.0.0  # 如果此runtime不存在，可尝试org.deepin.runtime/23.0.1
 
           # 应用构建规则（此处我们只是复制文件，无需复杂编译）
           build: |
@@ -198,6 +198,12 @@ jobs:
           echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
           sudo apt-get install -y linglong-builder linglong-box linglong-bin
+          # 💡 核心修复：在 CI 环境中强制启用并启动玲珑相关的 D-Bus 和后台服务
+          sudo systemctl unmask org.deepin.linglong.PackageManager.service || true
+          sudo systemctl start org.deepin.linglong.PackageManager.service || true
+          
+          # 刷新并初始化本地玲珑仓库缓存
+          ll-builder repo show || true
           
       - name: List available base/runtime versions
         run: |
@@ -208,7 +214,6 @@ jobs:
         run: |
           cd linglong-project
           # 确保使用官方稳定仓库
-          ll-builder repo show || true
           ll-builder build
           ll-builder export --layer
           ls -la *.layer      
