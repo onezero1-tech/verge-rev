@@ -198,26 +198,31 @@ jobs:
           echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
           sudo apt-get install -y linglong-builder linglong-box linglong-bin
-          # 2. 绕过 systemctl：在虚拟环境后台直接启动 D-Bus 并手动常驻运行玲珑服务进程
+          # 2. 在 CI 虚拟环境下初始化本地 D-Bus 环回
           sudo mkdir -p /var/run/dbus
           sudo dbus-daemon --system --fork || true
           
-          echo "=== 尝试直接手动后台拉起玲珑包管理器进程 ==="
-          # 玲珑包管理器的绝对路径通常在 /usr/libexec/ 或 /usr/lib/linglong/
-          if [ -f "/usr/libexec/linglong/linglong-package-manager" ]; then
-            sudo /usr/libexec/linglong/linglong-package-manager &
-          elif [ -f "/usr/lib/linglong/linglong-package-manager" ]; then
-            sudo /usr/lib/linglong/linglong-package-manager &
+          # 3. 强制初始化玲珑本地运行目录（防止服务因为找不到目录而闪退）
+          sudo mkdir -p /var/lib/linglong /root/linglong
+          
+          echo "=== 正在精确定位并手动拉起玲珑包管理器进程 ==="
+          # 精确查找后台守护进程文件的实际位置并直接拉起
+          MANAGER_PATH=$(sudo find /usr -name "linglong-package-manager" -print -quit)
+          if [ -n "$MANAGER_PATH" ]; then
+            echo "找到服务路径: $MANAGER_PATH，正在将其作为后台进程拉起..."
+            sudo "$MANAGER_PATH" > /tmp/linglong-pm.log 2>&1 &
           else
-            # 兼容其他路径
-            sudo find /usr -name "linglong-package-manager" -exec {} & \; || true
+            echo "警告：未找到 linglong-package-manager，尝试直接拉起全局命令..."
+            sudo linglong-package-manager > /tmp/linglong-pm.log 2>&1 &
           fi
           
-          # 给进程启动留出 3 秒响应时间
-          sleep 3
-          
+          # 留出 5 秒钟给玲珑子系统初始化云端连接
+          sleep 5
+          # 打印后台日志，方便过编译时观察它有没有成功运行
+          echo "=== 玲珑服务启动初期的后台日志 ==="
+          cat /tmp/linglong-pm.log || true         
           # 刷新并初始化本地玲珑仓库缓存
-          ll-builder repo show || true
+          sudo ll-builder repo show || true
           
       - name: List available base/runtime versions
         run: |
@@ -227,9 +232,10 @@ jobs:
       - name: Build Linglong package
         run: |
           cd linglong-project
+          sudo ll-builder repo show || true
           # 确保使用官方稳定仓库
-          ll-builder build
-          ll-builder export --layer
+          sudo ll-builder build
+          sudo ll-builder export --layer
           ls -la *.layer      
 
 
