@@ -202,18 +202,21 @@ jobs:
           sudo mkdir -p /var/run/dbus
           sudo dbus-daemon --system --fork || true
           
-          # 3. 强制初始化玲珑本地运行目录（防止服务因为找不到目录而闪退）
-          sudo mkdir -p /var/lib/linglong /root/linglong
+          # 3. 强制创建玲珑本地运行目录
+          sudo mkdir -p /var/lib/linglong /root/linglong /var/lib/linglong/repo
           
-          echo "=== 正在精确定位并手动拉起玲珑包管理器进程 ==="
-          # 精确查找后台守护进程文件的实际位置并直接拉起
-          MANAGER_PATH=$(sudo find /usr -name "linglong-package-manager" -print -quit)
-          if [ -n "$MANAGER_PATH" ]; then
-            echo "找到服务路径: $MANAGER_PATH，正在将其作为后台进程拉起..."
-            sudo "$MANAGER_PATH" > /tmp/linglong-pm.log 2>&1 &
+          echo "=== 正在全盘检索新版玲珑服务进程名并手动后台拉起 ==="
+          # 💡 核心修复：通过 dpkg 实时检索当前安装的玲珑包管理器核心服务名（兼容新旧各版本命名）
+          SERVICE_PATH=$(dpkg -L linglong-bin | grep -E '(package-manager|daemon|ll-pm|linglong-pm)' | head -n 1)
+          
+          if [ -n "$SERVICE_PATH" ] && [ -f "$SERVICE_PATH" ]; then
+            echo "精确锁定玲珑核心服务：$SERVICE_PATH，正在拉起后台..."
+            sudo "$SERVICE_PATH" > /tmp/linglong-daemon.log 2>&1 &
           else
-            echo "警告：未找到 linglong-package-manager，尝试直接拉起全局命令..."
-            sudo linglong-package-manager > /tmp/linglong-pm.log 2>&1 &
+            echo "未通过规则检索到，尝试备用常见新版进程名..."
+            sudo /usr/libexec/linglong/ll-package-manager > /tmp/linglong-daemon.log 2>&1 &
+            sudo /usr/lib/linglong/ll-package-manager >> /tmp/linglong-daemon.log 2>&1 &
+            sudo ll-package-manager >> /tmp/linglong-daemon.log 2>&1 &
           fi
           
           # 留出 5 秒钟给玲珑子系统初始化云端连接
