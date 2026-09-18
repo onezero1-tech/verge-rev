@@ -9,11 +9,6 @@ on:
 jobs:
   build-linglong:
     runs-on: ubuntu-24.04
-    container:
-      # 使用包含 deepin base 缓存的社区镜像，避免手动安装和网络超时
-      # 如果此镜像不可用，请尝试 ghcr.io/jacklau1222/deepin-base:latest
-      image: ghcr.io/jacklau1222/deepin-base:latest
-      options: --user root
 
     env:
       GIT_CONFIG_COUNT: "1"
@@ -26,11 +21,10 @@ jobs:
         with:
           submodules: 'recursive'
 
-      # 以下系统依赖仍需安装，用于编译 Tauri 应用
       - name: Install system dependencies
         run: |
-          apt-get update
-          apt-get install -y \
+          sudo apt-get update
+          sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
@@ -94,7 +88,7 @@ jobs:
           if [ -d "src-tauri/icons" ]; then
             cp -r src-tauri/icons linglong-project/icons
           fi
-          # 生成 AppRun.sh 启动脚本
+
           cat > linglong-project/AppRun.sh << 'EOF'
           #!/bin/bash
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
@@ -106,6 +100,7 @@ jobs:
           exec "$DIR/clash-verge" "$@"
           EOF
           chmod +x linglong-project/AppRun.sh
+
           mkdir -p linglong-project/share/applications
           mkdir -p linglong-project/share/icons/hicolor/256x256/apps
           cat > linglong-project/share/applications/io.github.clash-verge-rev.desktop << 'EOF'
@@ -118,11 +113,13 @@ jobs:
           Categories=Network;
           Terminal=false
           EOF
+
           if [ -f linglong-project/icons/128x128.png ]; then
             cp linglong-project/icons/128x128.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
           elif [ -f linglong-project/icons/icon.png ]; then
             cp linglong-project/icons/icon.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
           fi
+
           echo "=== linglong-project contents ==="
           find linglong-project -type f | head -40
 
@@ -161,19 +158,15 @@ jobs:
           echo "=== linglong.yaml ==="
           cat linglong-project/linglong.yaml
 
-      # 直接使用镜像中已安装的 ll-builder，无需再手动安装玲珑工具链
       - name: Build Linglong package
-        run: |
-          cd linglong-project
-          ll-builder build
-          ll-builder export --layer
-          ls -la *.layer
+        uses: myml/linglong-builder-action@main
+        with:
+          file: linglong-project/linglong.yaml
+          format: layer
 
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
         with:
           name: clash-verge-rev-linglong
-          path: |
-            linglong-project/*.layer
-            linglong-project/*.uab
+          path: ./*.layer
           if-no-files-found: error
