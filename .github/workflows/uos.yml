@@ -144,11 +144,6 @@ jobs:
           echo "=== linglong-project contents ==="
           find linglong-project -type f | head -40
 
-      - name: List available base/runtime versions
-        run: |
-          ll-cli search --type=base org.deepin.base || true
-          ll-cli search --type=runtime org.deepin.runtime || true
-
       - name: Generate linglong.yaml
         run: |
           cat > linglong-project/linglong.yaml << 'YAML_EOF'
@@ -172,7 +167,7 @@ jobs:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
 
           # 关键：根据玲珑文档，基础环境选择deepin base，运行时选择GTK4环境
-          base: org.deepin.base/23.1.0.3
+          base: org.deepin.base/23.1.0
           runtime: org.deepin.runtime.gtk4/23.0.1  # 如果此runtime不存在，可尝试org.deepin.runtime/23.0.1
 
           # 应用构建规则（此处我们只是复制文件，无需复杂编译）
@@ -203,7 +198,11 @@ jobs:
           echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
           sudo apt-get install -y linglong-builder linglong-box linglong-bin
-
+          
+      - name: List available base/runtime versions
+        run: |
+          ll-cli search --type=base org.deepin.base || true
+          ll-cli search --type=runtime org.deepin.runtime || true
           
       - name: Build Linglong package
         run: |
