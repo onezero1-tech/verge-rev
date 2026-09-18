@@ -189,8 +189,8 @@ jobs:
           cd linglong-project
           # 确保使用官方稳定仓库
           ll-builder repo show || true
-          ll-builder -v build
-          ll-builder -v export --layer
+          ll-builder build
+          ll-builder export --layer
           ls -la *.layer      
 
 
