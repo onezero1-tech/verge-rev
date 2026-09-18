@@ -159,7 +159,7 @@ jobs:
           cat linglong-project/linglong.yaml
 
       - name: Build Linglong package
-        uses: myml/linglong-builder-action@main
+        uses: onezero1-tech/linglong-builder-action@main
         with:
           file: linglong-project/linglong.yaml
           format: layer
