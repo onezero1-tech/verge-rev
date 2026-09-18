@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-linglong:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04  # 或 ubuntu-22.04，但24.04是玲珑官方明确支持的
 
     env:
       GIT_CONFIG_COUNT: "1"
@@ -149,14 +149,16 @@ jobs:
             kind: app
             description: |
               Clash Verge Rev - A Clash Meta GUI based on Tauri
-            architecture: amd64
+            architecture: x86_64  # 明确使用x86_64，玲珑标准架构名
 
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
 
-          base: org.deepin.base/25.2.0
-          runtime: org.deepin.runtime.gtk4/25.2.1.0
+          # 关键：根据玲珑文档，基础环境选择deepin base，运行时选择GTK4环境
+          base: org.deepin.base/25.2.2.8
+          runtime: org.deepin.runtime.gtk4/25.2.2.0  # 如果此runtime不存在，可尝试org.deepin.runtime/23.0.1
 
+          # 应用构建规则（此处我们只是复制文件，无需复杂编译）
           build: |
             # 将准备阶段的所有文件复制到玲珑容器的安装前缀
             cp -r clash-verge $PREFIX/
@@ -174,11 +176,22 @@ jobs:
           echo "=== linglong.yaml ==="
           cat linglong-project/linglong.yaml
 
+      - name: Install Linglong toolchain
+        run: |
+          # 添加玲珑官方仓库源（针对Ubuntu 24.04）
+          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/xUbuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          sudo apt-get update
+          sudo apt-get install -y linglong-builder linglong-box linglong-bin
+
       - name: Build Linglong package
-        uses: myml/linglong-builder-action@main
-        with:
-          file: 'linglong-project/linglong.yaml'
-          format: 'layer'
+        run: |
+          cd linglong-project
+          # 构建玲珑应用
+          ll-builder build --verbose
+          # 导出layer文件（这是玲珑应用的标准分发格式）
+          ll-builder export --layer --verbose
+          # 如果要导出UAB格式（更先进的离线包格式），可以运行：
+          # ll-builder export --uab --verbose
 
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
