@@ -125,7 +125,7 @@ jobs:
 
       - name: Generate linglong.yaml
         run: |
-          cat > linglong-project/linglong.yaml << 'YAML_EOF'
+          cat > linglong.yaml << 'YAML_EOF'
           version: '1'
           package:
             id: io.github.clash-verge-rev
@@ -143,12 +143,12 @@ jobs:
           base: org.deepin.base/23.0.0
           runtime: org.deepin.runtime.gtk4/23.0.0
           build: |
-            cp -r clash-verge $PREFIX/
-            cp -r AppRun.sh $PREFIX/
-            cp -r sidecar $PREFIX/ 2>/dev/null || true
-            cp -r resources $PREFIX/ 2>/dev/null || true
-            cp -r icons $PREFIX/ 2>/dev/null || true
-            cp -r share $PREFIX/
+            cp -r linglong-project/clash-verge $PREFIX/
+            cp -r linglong-project/AppRun.sh $PREFIX/
+            cp -r linglong-project/sidecar $PREFIX/ 2>/dev/null || true
+            cp -r linglong-project/resources $PREFIX/ 2>/dev/null || true
+            cp -r linglong-project/icons $PREFIX/ 2>/dev/null || true
+            cp -r linglong-project/share $PREFIX/
             chmod +x $PREFIX/clash-verge
             chmod +x $PREFIX/AppRun.sh
             if [ -d "$PREFIX/sidecar" ]; then
@@ -156,12 +156,11 @@ jobs:
             fi
           YAML_EOF
           echo "=== linglong.yaml ==="
-          cat linglong-project/linglong.yaml
+          cat linglong.yaml
 
       - name: Build Linglong package
         uses: onezero1-tech/linglong-builder-action@main
         with:
-          file: linglong-project/linglong.yaml
           format: layer
 
       - name: Upload Linglong artifact
