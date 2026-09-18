@@ -183,15 +183,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y linglong-builder linglong-box linglong-bin
 
+          
       - name: Build Linglong package
         run: |
           cd linglong-project
-          # 构建玲珑应用
-          ll-builder build --verbose
-          # 导出layer文件（这是玲珑应用的标准分发格式）
-          ll-builder export --layer --verbose
-          # 如果要导出UAB格式（更先进的离线包格式），可以运行：
-          # ll-builder export --uab --verbose
+          # 确保使用官方稳定仓库
+          ll-builder repo show || true
+          ll-builder -v build
+          ll-builder -v export --layer
+          ls -la *.layer      
+
 
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
