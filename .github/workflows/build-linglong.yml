@@ -9,8 +9,8 @@ on:
 
 jobs:
   build-linglong:
-    # 使用 GitHub Actions 原生运行器，不使用容器，这是最可靠的方式
-    runs-on: ubuntu-22.04
+    # 使用 Debian 12 运行器
+    runs-on: debian-12
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     env:
@@ -44,8 +44,8 @@ jobs:
 
       - name: Install Linglong toolchain
         run: |
-          # 1. 安装玲珑仓库源
-          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          # 1. 安装玲珑仓库源，改为 Debian 12
+          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Debian_12/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
           # 2. 安装玲珑构建工具、沙箱容器和管理工具
           sudo apt-get install -y --no-install-recommends \
