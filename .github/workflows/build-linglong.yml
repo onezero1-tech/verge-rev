@@ -57,8 +57,7 @@ jobs:
 
       - name: Add community testing repo
         run: |
-          ll-builder repo add community-testing https://mirror-repo-linglong.deepin.com/repos/community-testing || true
-          ll-builder repo update
+          ll-builder repo add community-testing https://cdn-linglong.odata.cc --alias=testing || true          ll-builder repo update
           echo "=== Repo list ==="
           ll-builder repo show
 
