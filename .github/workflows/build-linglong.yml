@@ -14,12 +14,13 @@ jobs:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: "safe.directory"
       GIT_CONFIG_VALUE_0: "*"
+      # 强制玲珑工具链使用点对点 D-Bus，不依赖系统守护进程
+      LL_NO_DBUS: "1"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 只需拿到 linglong.yaml 参考或版本号，这里保留 checkout 以便读取 tag 等信息
           fetch-depth: 1
 
       - name: Download Tauri artifact
@@ -28,9 +29,7 @@ jobs:
           workflow: build-tauri.yml
           name: linglong-project
           path: .
-          # 优先取最近一次成功的 run
           workflow_conclusion: success
-          # 如果当前有 tag，优先取相同 tag 的 run
           if_no_artifact_found: fail
 
       - name: Verify downloaded files
@@ -46,6 +45,29 @@ jobs:
           sudo apt-get install -y --no-install-recommends linglong-builder linglong-box linglong-bin
           ll-builder --version
           ll-cli --version || true
+
+      # 方案二：配置 D-Bus 策略并启动服务（兜底）
+      - name: Configure D-Bus policy and start Linglong service
+        run: |
+          sudo tee /etc/dbus-1/system.d/org.deepin.linglong.PackageManager.conf << 'EOF'
+          <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+           "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+          <busconfig>
+            <policy user="deepin-linglong">
+              <allow own="org.deepin.linglong.PackageManager1"/>
+            </policy>
+            <policy context="default">
+              <allow send_destination="org.deepin.linglong.PackageManager1"/>
+            </policy>
+          </busconfig>
+          EOF
+          sudo systemctl daemon-reload
+          sudo systemctl restart dbus.service
+          sleep 2
+          sudo systemctl start org.deepin.linglong.PackageManager.service || true
+          sleep 3
+          systemctl is-active org.deepin.linglong.PackageManager.service || true
+          busctl list --no-pager | grep -i linglong || true
 
       - name: Generate linglong.yaml
         run: |
@@ -64,8 +86,8 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          base: org.deepin.base/23.0.0
-          runtime: org.deepin.runtime/23.0.1
+          base: org.deepin.base/25.2.2.8
+          runtime: org.deepin.runtime.gtk4/25.2.2.0
           build: |
             cp -r linglong-project/clash-verge $PREFIX/
             cp -r linglong-project/AppRun.sh $PREFIX/
@@ -82,20 +104,20 @@ jobs:
           echo "=== linglong.yaml ==="
           cat linglong.yaml
 
+      # 方案一：所有命令强制 --no-dbus
       - name: Query available base and runtime
         run: |
-          ll-builder repo enable-mirror stable
+          ll-builder --no-dbus repo enable-mirror stable || true
           echo "=== Available base ==="
-          ll-cli search --type=base org.deepin.base || true
+          ll-cli --no-dbus search --type=base org.deepin.base || true
           echo "=== Available runtime ==="
-          ll-cli search --type=runtime org.deepin.runtime || true
-          echo "=== All runtime (no filter) ==="
-          ll-cli search --type=runtime || true
+          ll-cli --no-dbus search --type=runtime org.deepin.runtime || true
 
       - name: Build Linglong package
         run: |
-          ll-builder build
-          ll-builder export --layer
+          # 同时使用 --no-dbus 和环境变量 LL_NO_DBUS=1 双重保险
+          ll-builder --no-dbus build
+          ll-builder --no-dbus export --layer
           ls -la *.layer
 
       - name: Upload Linglong artifact
