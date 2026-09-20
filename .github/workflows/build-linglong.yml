@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: debian:12  # 在 Debian 12 容器中运行所有步骤
-      options: --cap-add=SYS_ADMIN --security-opt seccomp=unconfined
+      options: --privileged --device /dev/fuse
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     
     env:
@@ -151,6 +151,10 @@ jobs:
           
       - name: Enable user namespaces and load FUSE
         run: |
+          # 确保 FUSE 设备存在
+          if [ ! -e /dev/fuse ]; then
+            mknod /dev/fuse -m 0666 c 10 229 2>/dev/null || true
+          fi        
           # 启用非特权用户命名空间
           sysctl -w kernel.unprivileged_userns_clone=1 2>/dev/null || true
           sysctl -w user.max_user_namespaces=10000 2>/dev/null || true
