@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: debian:12  # 在 Debian 12 容器中运行所有步骤
+      options: --cap-add=SYS_ADMIN --security-opt seccomp=unconfined
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     
     env:
