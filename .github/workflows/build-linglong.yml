@@ -52,19 +52,17 @@ jobs:
           sudo apt-get install -y --no-install-recommends linglong-builder linglong-box linglong-bin
           ll-builder --version
           ll-cli --version || true
-      - name: Configure Linglong repositories
+          
+      - name: Add community testing repo
         run: |
-          # 添加社区测试源
-          ll-builder repo add community-testing https://cdn-linglong.odata.cc --alias=testing || true
-          ll-builder repo update
-          echo "=== Repo list ==="
-          ll-builder repo show
+          # 1. 添加构建源（供 ll-builder 使用）
+          ll-builder repo add --alias=testing stable https://cdn-linglong.odata.cc || true
+          ll-builder repo update || true
           
-          # 设置社区测试源为默认
-          ll-builder repo set-default testing || true
-          ll-builder repo show
+          # 2. 添加应用源（供 ll-cli 使用）
+          ll-cli repo add --alias=testing stable https://cdn-linglong.odata.cc || true
           
-          # 验证网络连接
+          # 3. 验证网络连接
           echo "Testing network connectivity..."
           timeout 10 curl -sI https://cdn-linglong.odata.cc || echo "Warning: Cannot reach community testing repo"
           
@@ -73,7 +71,7 @@ jobs:
           echo "=== All runtime ==="
           ll-cli search --type=runtime --show-all-version || true
           echo "=== gtk4 runtime ==="
-          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version  --repo testing || true
+          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version --repo testing || true 
           
       - name: Generate linglong.yaml
         run: |
