@@ -47,6 +47,28 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends curl wget git file
 
+      - name: Install Linglong toolchain
+        run: |
+          echo "deb [trusted=yes] https://ppa.linyaps.org.cn/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends linglong-builder linglong-box linglong-bin
+          ll-builder --version
+          ll-cli --version || true
+
+      - name: Add community testing repo
+        run: |
+          ll-builder repo add community-testing https://mirror-repo-linglong.deepin.com/repos/community-testing || true
+          ll-builder repo update
+          echo "=== Repo list ==="
+          ll-builder repo show
+
+      - name: Query available runtime
+        run: |
+          echo "=== All runtime ==="
+          ll-cli search --type=runtime --show-all-version || true
+          echo "=== gtk4 runtime ==="
+          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version || true
+          
       - name: Generate linglong.yaml
         run: |
           cat > linglong.yaml << 'YAML_EOF'
@@ -64,8 +86,8 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          base: org.deepin.base/25.2.1
-          runtime: org.deepin.runtime.gtk4/25.2.1
+          base: org.deepin.base/25.2.0.10
+          runtime: org.deepin.runtime.gtk4/25.2.2.1
           build: |
             cp -r linglong-project/clash-verge $PREFIX/
             cp -r linglong-project/AppRun.sh $PREFIX/
