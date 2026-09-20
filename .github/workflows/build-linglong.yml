@@ -9,10 +9,11 @@ on:
 
 jobs:
   build-linglong:
-    # 使用 Debian 12 运行器
-    runs-on: debian-12
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:12  # 在 Debian 12 容器中运行所有步骤
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-
+    
     env:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: "safe.directory"
