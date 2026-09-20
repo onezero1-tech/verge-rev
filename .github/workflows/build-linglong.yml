@@ -13,7 +13,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     container:
       # 使用 Docker Hub 上的 Deepin 23 官方镜像
-      image: docker.io/linuxdeepin/deepin:beige
+      image: linuxdeepin/deepin:25
       options: --user root --privileged
 
     env:
@@ -64,8 +64,8 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          base: org.deepin.base/23.0.0
-          runtime: org.deepin.runtime/23.0.0
+          base: org.deepin.base/25.2.2
+          runtime: org.deepin.runtime.gtk4/25.2.2
           build: |
             cp -r linglong-project/clash-verge $PREFIX/
             cp -r linglong-project/AppRun.sh $PREFIX/
