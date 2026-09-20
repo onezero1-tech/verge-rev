@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     container:
-      # 使用 Docker Hub 上的 Deepin 23 官方镜像
+      # 使用Docker Hub上的Deepin 25官方镜像
       image: linuxdeepin/deepin:25
       options: --user root --privileged
 
@@ -32,7 +32,7 @@ jobs:
         with:
           workflow: build-tauri.yml
           name: linglong-project
-          path: linglong-project   # 关键：解压到 linglong-project 目录
+          path: linglong-project   # 关键：解压到linglong-project目录
           workflow_conclusion: success
           if_no_artifact_found: fail
 
@@ -41,12 +41,10 @@ jobs:
           echo "=== linglong-project contents ==="
           find linglong-project -type f | head -40
           ls -la linglong-project/clash-verge
-
       - name: Install basic tools (for ll-builder action)
         run: |
           apt-get update
           apt-get install -y --no-install-recommends curl wget git file
-
       - name: Install Linglong toolchain
         run: |
           echo "deb [trusted=yes] https://ppa.linyaps.org.cn/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
@@ -54,18 +52,22 @@ jobs:
           sudo apt-get install -y --no-install-recommends linglong-builder linglong-box linglong-bin
           ll-builder --version
           ll-cli --version || true
-
-      - name: Add community testing repo
+      - name: Configure Linglong repositories
         run: |
-          ll-builder repo add community-testing https://cdn-linglong.odata.cc --alias=testing || true          ll-builder repo update
+          # 添加社区测试源
+          ll-builder repo add community-testing https://cdn-linglong.odata.cc --alias=testing || true
+          ll-builder repo update
           echo "=== Repo list ==="
           ll-builder repo show
           
-      - name: Set community repo as default
-        run: |
+          # 设置社区测试源为默认
           ll-builder repo set-default testing || true
-          ll-builder repo show        
-
+          ll-builder repo show
+          
+          # 验证网络连接
+          echo "Testing network connectivity..."
+          timeout 10 curl -sI https://cdn-linglong.odata.cc || echo "Warning: Cannot reach community testing repo"
+          
       - name: Query available runtime
         run: |
           echo "=== All runtime ==="
@@ -90,15 +92,24 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          # 修正版本号格式：从4位改为3位
           base: org.deepin.base/25.2.0
-          runtime: org.deepin.runtime.gtk4/25.2.2.1
+          runtime: org.deepin.runtime.gtk4/25.2.2  # 改为3位数字
           build: |
+            # 复制文件到玲珑容器标准路径
+            mkdir -p $PREFIX/bin
+            mkdir -p $PREFIX/share/applications
+            mkdir -p $PREFIX/share/icons/hicolor/128x128/apps
+            
+            # 复制主程序
             cp -r linglong-project/clash-verge $PREFIX/
             cp -r linglong-project/AppRun.sh $PREFIX/
             cp -r linglong-project/sidecar $PREFIX/ 2>/dev/null || true
             cp -r linglong-project/resources $PREFIX/ 2>/dev/null || true
             cp -r linglong-project/icons $PREFIX/ 2>/dev/null || true
             cp -r linglong-project/share $PREFIX/
+            
+            # 设置执行权限
             chmod +x $PREFIX/clash-verge
             chmod +x $PREFIX/AppRun.sh
             if [ -d "$PREFIX/sidecar" ]; then
@@ -107,11 +118,12 @@ jobs:
           YAML_EOF
           echo "=== linglong.yaml ==="
           cat linglong.yaml
-
       - name: Build Linglong package
         uses: onezero1-tech/linglong-builder-action@main
         with:
           format: layer
+          # 添加环境变量设置，确保UTF-8 locale
+          env_vars: LANG=C.UTF-8,LC_ALL=C.UTF-8
 
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
