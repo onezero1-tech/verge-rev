@@ -46,7 +46,7 @@ jobs:
       - name: Install Linglong toolchain
         run: |
           # 1. 安装玲珑仓库源，改为 Debian 12
-          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Debian_12/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Debian_12/ ./" | tee /etc/apt/sources.list.d/linglong.list
           apt-get update
           # 2. 安装玲珑构建工具、沙箱容器和管理工具
           apt-get install -y --no-install-recommends \
