@@ -60,6 +60,11 @@ jobs:
           ll-builder repo add community-testing https://cdn-linglong.odata.cc --alias=testing || true          ll-builder repo update
           echo "=== Repo list ==="
           ll-builder repo show
+          
+      - name: Set community repo as default
+        run: |
+          ll-builder repo set-default community-testing || true
+          ll-builder repo show        
 
       - name: Query available runtime
         run: |
@@ -85,7 +90,7 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          base: org.deepin.base/25.2.0.10
+          base: org.deepin.base/25.2.0
           runtime: org.deepin.runtime.gtk4/25.2.2.1
           build: |
             cp -r linglong-project/clash-verge $PREFIX/
