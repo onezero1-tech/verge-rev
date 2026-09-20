@@ -45,6 +45,23 @@ jobs:
 
       - name: Install Linglong toolchain
         run: |
+          # 1. 更新包列表并安装基础工具（包括 CA 证书）
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            openssl \
+            curl \
+            wget \
+            git \
+            file \
+            gnupg \
+            apt-transport-https
+
+          # 2. 更新 CA 证书信任库
+          update-ca-certificates
+
+          # 3. 添加玲珑仓库源（Debian 12）
+          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Debian_12/ ./" | tee /etc/apt/sources.list.d/linglong.list        
           # 1. 安装玲珑仓库源，改为 Debian 12
           echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Debian_12/ ./" | tee /etc/apt/sources.list.d/linglong.list
           apt-get update
