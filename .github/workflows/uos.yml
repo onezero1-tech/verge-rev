@@ -158,13 +158,6 @@ jobs:
           echo "=== linglong.yaml ==="
           cat linglong.yaml
 
-      - name: Query available base and runtime
-        run: |
-          ll-builder repo enable-mirror stable
-          echo "=== Available base ==="
-          ll-cli search --type=base org.deepin.base || true
-          echo "=== Available runtime ==="
-          ll-cli search --type=runtime org.deepin.runtime || true
 
       - name: Build Linglong package
         uses: onezero1-tech/linglong-builder-action@main
