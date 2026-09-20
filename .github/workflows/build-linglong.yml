@@ -79,11 +79,11 @@ jobs:
       - name: Query available runtime
         run: |
           echo "=== 查询所有可用的 Runtime ==="
-          ll-cli search --type=runtime --show-all-version --keyword=gtk4 || true
+          ll-cli search org.deepin.runtime.gtk4  --type=runtime --show-all-version || true
           echo "=== 查询 Base Runtime ==="
-          ll-cli search --type=runtime --show-all-version --keyword=base || true
+          ll-cli search org.deepin.base --type=runtime --show-all-version || true
           echo "=== 查询指定仓库的 GTK4 Runtime ==="
-          ll-cli search --type=runtime --show-all-version --keyword=gtk4 --repo=testing || true
+          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version --repo=testing || true
 
       - name: Generate linglong.yaml
         run: |
