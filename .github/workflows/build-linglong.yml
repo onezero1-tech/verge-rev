@@ -55,7 +55,7 @@ jobs:
           # 最新版本可在 https://github.com/System233/ll-killer-go/releases 查看
           LL_KILLER_VERSION="v1.5.5"
           curl -L -o /usr/local/bin/ll-killer \
-            "https://github.com/System233/ll-killer-go/releases/download/${LL_KILLER_VERSION}/ll-killer-linux-amd64"
+            "https://github.com/System233/ll-killer-go/releases/download/${LL_KILLER_VERSION}/ll-killer-amd64"
           chmod +x /usr/local/bin/ll-killer
 
           # 验证安装
