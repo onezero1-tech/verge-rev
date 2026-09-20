@@ -119,8 +119,7 @@ jobs:
         run: |
           # ll-killer layer build 会读取当前目录的 linglong.yaml，执行 build 脚本，并生成 .layer 文件
           # --no-strip 保留调试符号，可根据需要调整
-          ll-killer layer build --no-strip
-
+          ll-killer layer build
           echo "=== Generated layer files ==="
           find . -name "*.layer" -o -name "*.uab" | head -20
           ls -la *.layer 2>/dev/null || echo "No layer files found"
