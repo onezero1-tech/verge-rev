@@ -1,0 +1,106 @@
+name: Build Linglong Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-linglong:
+    runs-on: ubuntu-24.04
+
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "*"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 只需拿到 linglong.yaml 参考或版本号，这里保留 checkout 以便读取 tag 等信息
+          fetch-depth: 1
+
+      - name: Download Tauri artifact
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build-tauri.yml
+          name: linglong-project
+          path: .
+          # 优先取最近一次成功的 run
+          workflow_conclusion: success
+          # 如果当前有 tag，优先取相同 tag 的 run
+          if_no_artifact_found: fail
+
+      - name: Verify downloaded files
+        run: |
+          echo "=== linglong-project contents ==="
+          find linglong-project -type f | head -40
+          file linglong-project/clash-verge
+
+      - name: Install Linglong toolchain
+        run: |
+          echo "deb [trusted=yes] https://ppa.linyaps.org.cn/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends linglong-builder linglong-box linglong-bin
+          ll-builder --version
+          ll-cli --version || true
+
+      - name: Generate linglong.yaml
+        run: |
+          cat > linglong.yaml << 'YAML_EOF'
+          version: '1'
+          package:
+            id: io.github.clash-verge-rev
+            name: Clash Verge Rev
+            version: 2.5.4.0
+            kind: app
+            description: |
+              Clash Verge Rev - A Clash Meta GUI based on Tauri
+            architecture: x86_64
+          permissions:
+            - network
+            - local_socket
+          command:
+            - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          base: org.deepin.base/23.0.0
+          runtime: org.deepin.runtime/23.0.1
+          build: |
+            cp -r linglong-project/clash-verge $PREFIX/
+            cp -r linglong-project/AppRun.sh $PREFIX/
+            cp -r linglong-project/sidecar $PREFIX/ 2>/dev/null || true
+            cp -r linglong-project/resources $PREFIX/ 2>/dev/null || true
+            cp -r linglong-project/icons $PREFIX/ 2>/dev/null || true
+            cp -r linglong-project/share $PREFIX/
+            chmod +x $PREFIX/clash-verge
+            chmod +x $PREFIX/AppRun.sh
+            if [ -d "$PREFIX/sidecar" ]; then
+              chmod +x $PREFIX/sidecar/* 2>/dev/null || true
+            fi
+          YAML_EOF
+          echo "=== linglong.yaml ==="
+          cat linglong.yaml
+
+      - name: Query available base and runtime
+        run: |
+          ll-builder repo enable-mirror stable
+          echo "=== Available base ==="
+          ll-cli search --type=base org.deepin.base || true
+          echo "=== Available runtime ==="
+          ll-cli search --type=runtime org.deepin.runtime || true
+          echo "=== All runtime (no filter) ==="
+          ll-cli search --type=runtime || true
+
+      - name: Build Linglong package
+        run: |
+          ll-builder build
+          ll-builder export --layer
+          ls -la *.layer
+
+      - name: Upload Linglong artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clash-verge-rev-linglong
+          path: ./*.layer
+          if-no-files-found: error
