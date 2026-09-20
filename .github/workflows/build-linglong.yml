@@ -63,7 +63,7 @@ jobs:
           
       - name: Set community repo as default
         run: |
-          ll-builder repo set-default community-testing || true
+          ll-builder repo set-default testing || true
           ll-builder repo show        
 
       - name: Query available runtime
@@ -71,7 +71,7 @@ jobs:
           echo "=== All runtime ==="
           ll-cli search --type=runtime --show-all-version || true
           echo "=== gtk4 runtime ==="
-          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version || true
+          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version  --repo testing || true
           
       - name: Generate linglong.yaml
         run: |
