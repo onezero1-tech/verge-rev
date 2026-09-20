@@ -64,8 +64,8 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          base: org.deepin.base/25.2.2
-          runtime: org.deepin.runtime.gtk4/25.2.2
+          base: org.deepin.base/25.2.0.10
+          runtime: org.deepin.runtime.gtk4/25.2.1.0
           build: |
             cp -r linglong-project/clash-verge $PREFIX/
             cp -r linglong-project/AppRun.sh $PREFIX/
