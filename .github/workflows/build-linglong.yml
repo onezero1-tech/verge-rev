@@ -10,16 +10,21 @@ on:
 jobs:
   build-linglong:
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     container:
-      # 使用Docker Hub上的Deepin 25官方镜像
       image: linuxdeepin/deepin:25
-      options: --user root --privileged
-
+      options: >-
+        --user root 
+        --privileged 
+        --cap-add=SYS_ADMIN 
+        --cap-add=MKNOD 
+        --security-opt seccomp=unconfined 
+        --security-opt apparmor=unconfined
+      volumes:
+        - /sys/fs/cgroup:/sys/fs/cgroup
+    
     env:
-      GIT_CONFIG_COUNT: "1"
-      GIT_CONFIG_KEY_0: "safe.directory"
-      GIT_CONFIG_VALUE_0: "*"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
 
     steps:
       - name: Checkout
@@ -52,6 +57,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends linglong-builder linglong-box linglong-bin
           ll-builder --version
           ll-cli --version || true
+          
+      - name: Install fuse-overlayfs
+        run: |
+          # 安装 fuse-overlayfs 作为替代方案
+          apt-get update
+          apt-get install -y fuse-overlayfs || true
+          
+          # 配置玲珑使用 fuse-overlayfs
+          export LINGLONG_OVERLAYFS_BACKEND=fuse-overlayfs
           
       - name: Add community testing repo
         run: |
