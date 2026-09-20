@@ -66,12 +66,31 @@ jobs:
           echo "Testing network connectivity..."
           timeout 10 curl -sI https://cdn-linglong.odata.cc || echo "Warning: Cannot reach community testing repo"
           
-      - name: Query available runtime
+      - name: Query available runtime and base
         run: |
-          echo "=== All runtime ==="
-          ll-cli search --type=runtime --show-all-version || true
-          echo "=== gtk4 runtime ==="
-          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version --repo testing || true 
+          echo "=== 查询 GTK4 Runtime ==="
+          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version --repo testing || true
+          
+          echo "=== 查询 Base 环境 ==="
+          ll-cli search org.deepin.base --type=runtime --show-all-version --repo testing || true
+          
+          echo "=== 查询当前可用的 Base 版本 ==="
+          ll-cli search org.deepin.base --type=runtime --show-all-version 2>/dev/null | grep "25.2" || true
+          
+          # ============================================
+          # 2. 验证网络连接和仓库配置
+          # ============================================
+          
+          echo "=== 验证网络连接 ==="
+          timeout 10 curl -sI https://cdn-linglong.odata.cc && echo "✅ 可以访问社区测试源" || echo "❌ 无法访问社区测试源"
+          
+          # 检查仓库列表
+          echo "=== 当前仓库配置 ==="
+          ll-cli repo list || true
+          
+          # 检查镜像状态
+          echo "=== 镜像状态 ==="
+          ll-cli repo show testing 2>/dev/null || true
           
       - name: Generate linglong.yaml
         run: |
@@ -91,7 +110,7 @@ jobs:
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
           # 修正版本号格式：从4位改为3位
-          base: org.deepin.base/25.2.0
+          base: org.deepin.base/25.2.2
           runtime: org.deepin.runtime.gtk4/25.2.2  # 改为3位数字
           build: |
             # 复制文件到玲珑容器标准路径
