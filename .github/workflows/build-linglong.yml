@@ -2,17 +2,20 @@ name: Build Linglong Package
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: ["Build Tauri Artifacts"]
+    types:
+      - completed
 
 jobs:
   build-linglong:
     runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     container:
-      # 使用 Deepin 25 官方镜像，与 UOS 25 兼容
-      image: ghcr.io/linuxdeepin/deepin:25
-      options: --user root
+      # 使用 Docker Hub 上的 Deepin 23 官方镜像
+      # 如果确实存在私有 deepin:25 镜像，可替换为它的完整地址
+      image: deepin:25
+      options: --user root --privileged
 
     env:
       GIT_CONFIG_COUNT: "1"
@@ -42,8 +45,7 @@ jobs:
 
       - name: Install Linglong toolchain
         run: |
-          # 使用 Deepin_25 的 APT 源
-          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Deepin_25/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          echo "deb [trusted=yes] https://ppa.linyaps.org.cn/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends linglong-builder linglong-box linglong-bin
           ll-builder --version
@@ -66,8 +68,8 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          base: org.deepin.base/25.2.2
-          runtime: org.deepin.runtime.dtk/25.2.2
+          base: org.deepin.base/23.0.0
+          runtime: org.deepin.runtime/23.0.0
           build: |
             cp -r linglong-project/clash-verge $PREFIX/
             cp -r linglong-project/AppRun.sh $PREFIX/
