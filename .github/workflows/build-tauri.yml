@@ -1,0 +1,132 @@
+name: Build Tauri Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-tauri:
+    runs-on: ubuntu-24.04
+
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "*"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2 \
+            libssl-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            pkg-config \
+            build-essential \
+            curl wget git unzip file binutils
+
+      - name: Install Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.13.2 --activate
+          pnpm --version
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup show active-toolchain
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Download sidecars and resources (prebuild)
+        run: |
+          set -e
+          node scripts/prebuild.mjs x86_64-unknown-linux-gnu
+          echo "=== src-tauri/sidecar/ ==="
+          ls -la src-tauri/sidecar/
+          echo "=== src-tauri/resources/ ==="
+          ls -la src-tauri/resources/ 2>/dev/null || true
+
+      - name: Build Tauri application (no bundle)
+        run: |
+          cargo tauri build --no-bundle --verbose
+          echo "=== Build output ==="
+          ls -la target/release/
+          file target/release/clash-verge
+
+      - name: Prepare linglong-project directory
+        run: |
+          set -e
+          mkdir -p linglong-project
+          cp target/release/clash-verge linglong-project/clash-verge
+          chmod +x linglong-project/clash-verge
+          cp -r src-tauri/sidecar linglong-project/sidecar 2>/dev/null || true
+          cp -r src-tauri/resources linglong-project/resources 2>/dev/null || true
+          if [ -d "src-tauri/icons" ]; then
+            cp -r src-tauri/icons linglong-project/icons
+          fi
+
+          cat > linglong-project/AppRun.sh << 'EOF'
+          #!/bin/bash
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+          export GIO_LAUNCHED_DESKTOP_FILE_PID=$$
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export PATH="$DIR/sidecar:$PATH"
+          chmod +x "$DIR/sidecar"/* 2>/dev/null || true
+          exec "$DIR/clash-verge" "$@"
+          EOF
+          chmod +x linglong-project/AppRun.sh
+
+          mkdir -p linglong-project/share/applications
+          mkdir -p linglong-project/share/icons/hicolor/256x256/apps
+          cat > linglong-project/share/applications/io.github.clash-verge-rev.desktop << 'EOF'
+          [Desktop Entry]
+          Name=Clash Verge Rev
+          Comment=Clash Meta GUI
+          Exec=/opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          Icon=io.github.clash-verge-rev
+          Type=Application
+          Categories=Network;
+          Terminal=false
+          EOF
+
+          if [ -f linglong-project/icons/128x128.png ]; then
+            cp linglong-project/icons/128x128.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
+          elif [ -f linglong-project/icons/icon.png ]; then
+            cp linglong-project/icons/icon.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
+          fi
+
+          echo "=== linglong-project contents ==="
+          find linglong-project -type f | head -40
+
+      - name: Upload linglong-project artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linglong-project
+          path: linglong-project/
+          if-no-files-found: error
+          retention-days: 30
