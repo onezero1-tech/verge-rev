@@ -140,8 +140,8 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          base: org.deepin.base/23.0.0
-          runtime: org.deepin.runtime.gtk4/23.0.0
+          base: org.deepin.base/25.2.2.8
+          runtime: org.deepin.runtime.gtk4/25.2.2.0
           build: |
             cp -r linglong-project/clash-verge $PREFIX/
             cp -r linglong-project/AppRun.sh $PREFIX/
@@ -157,6 +157,14 @@ jobs:
           YAML_EOF
           echo "=== linglong.yaml ==="
           cat linglong.yaml
+
+      - name: Query available base and runtime
+        run: |
+          ll-builder repo enable-mirror stable
+          echo "=== Available base ==="
+          ll-cli search --type=base org.deepin.base || true
+          echo "=== Available runtime ==="
+          ll-cli search --type=runtime org.deepin.runtime || true
 
       - name: Build Linglong package
         uses: onezero1-tech/linglong-builder-action@main
