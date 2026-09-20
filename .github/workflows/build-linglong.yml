@@ -148,6 +148,22 @@ jobs:
           echo "=== linglong.yaml ==="
           cat linglong.yaml
 
+          
+      - name: Enable user namespaces and load FUSE
+        run: |
+          # 启用非特权用户命名空间
+          sysctl -w kernel.unprivileged_userns_clone=1 2>/dev/null || true
+          sysctl -w user.max_user_namespaces=10000 2>/dev/null || true
+          
+          # 尝试加载 FUSE 内核模块
+          modprobe fuse 2>/dev/null || true
+          
+          # 验证 /dev/fuse 设备是否存在
+          ls -la /dev/fuse || echo "⚠️ /dev/fuse not found"
+          
+          # 安装 fuse3（提供 fusermount3 等工具）
+          apt-get install -y --no-install-recommends fuse3         
+
       - name: Build Linglong package
         run: |
           # 尝试使用内核级 OverlayFS，如果失败则切换到 Fuse-OverlayFS
