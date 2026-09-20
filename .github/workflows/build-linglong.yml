@@ -9,20 +9,15 @@ on:
 
 jobs:
   build-linglong:
+    # 使用 GitHub Actions 原生运行器，不使用容器，这是最可靠的方式
     runs-on: ubuntu-24.04
-    container:
-      image: linuxdeepin/deepin:25
-      options: >-
-        --user root 
-        --privileged 
-        --cap-add=SYS_ADMIN 
-        --cap-add=MKNOD 
-        --security-opt seccomp=unconfined 
-        --security-opt apparmor=unconfined
-      volumes:
-        - /sys/fs/cgroup:/sys/fs/cgroup
-    
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
     env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "*"
+      # 设置 UTF-8 locale，避免 Qt 相关警告
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
 
@@ -37,7 +32,7 @@ jobs:
         with:
           workflow: build-tauri.yml
           name: linglong-project
-          path: linglong-project   # 关键：解压到linglong-project目录
+          path: linglong-project
           workflow_conclusion: success
           if_no_artifact_found: fail
 
@@ -46,66 +41,50 @@ jobs:
           echo "=== linglong-project contents ==="
           find linglong-project -type f | head -40
           ls -la linglong-project/clash-verge
-      - name: Install basic tools (for ll-builder action)
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends curl wget git file
+
       - name: Install Linglong toolchain
         run: |
-          echo "deb [trusted=yes] https://ppa.linyaps.org.cn/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          # 1. 安装玲珑仓库源
+          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends linglong-builder linglong-box linglong-bin
+          # 2. 安装玲珑构建工具、沙箱容器和管理工具
+          sudo apt-get install -y --no-install-recommends \
+            linglong-builder \
+            linglong-box \
+            linglong-bin \
+            curl \
+            wget \
+            git \
+            file \
+            fuse-overlayfs # 安装 Fuse-OverlayFS 作为后备方案
+          # 3. 验证安装
           ll-builder --version
           ll-cli --version || true
-          
-      - name: Install fuse-overlayfs
-        run: |
-          # 安装 fuse-overlayfs 作为替代方案
-          apt-get update
-          apt-get install -y fuse-overlayfs || true
-          
-          # 配置玲珑使用 fuse-overlayfs
-          export LINGLONG_OVERLAYFS_BACKEND=fuse-overlayfs
-          
+          # 检查 Fuse-OverlayFS 是否可用
+          fuse-overlayfs --version || true
+
       - name: Add community testing repo
         run: |
-          # 1. 添加构建源（供 ll-builder 使用）
+          # 正确语法：--alias 必须在位置参数之前
           ll-builder repo add --alias=testing stable https://cdn-linglong.odata.cc || true
           ll-builder repo update || true
-          
-          # 2. 添加应用源（供 ll-cli 使用）
+          # 同时添加到 ll-cli 仓库，供查询和运行使用
           ll-cli repo add --alias=testing stable https://cdn-linglong.odata.cc || true
-          
-          # 3. 验证网络连接
+          echo "=== Repo list ==="
+          ll-builder repo show testing 2>/dev/null || true
+          # 验证网络连接
           echo "Testing network connectivity..."
-          timeout 10 curl -sI https://cdn-linglong.odata.cc || echo "Warning: Cannot reach community testing repo"
-          
-      - name: Query available runtime and base
+          timeout 10 curl -sI https://cdn-linglong.odata.cc && echo "✅ 网络连接正常" || echo "⚠️ 无法访问社区测试源"
+
+      - name: Query available runtime
         run: |
-          echo "=== 查询 GTK4 Runtime ==="
-          ll-cli search org.deepin.runtime.gtk4 --type=runtime --show-all-version --repo testing || true
-          
-          echo "=== 查询 Base 环境 ==="
-          ll-cli search org.deepin.base --type=runtime --show-all-version --repo testing || true
-          
-          echo "=== 查询当前可用的 Base 版本 ==="
-          ll-cli search org.deepin.base --type=runtime --show-all-version 2>/dev/null | grep "25.2" || true
-          
-          # ============================================
-          # 2. 验证网络连接和仓库配置
-          # ============================================
-          
-          echo "=== 验证网络连接 ==="
-          timeout 10 curl -sI https://cdn-linglong.odata.cc && echo "✅ 可以访问社区测试源" || echo "❌ 无法访问社区测试源"
-          
-          # 检查仓库列表
-          echo "=== 当前仓库配置 ==="
-          ll-cli repo list || true
-          
-          # 检查镜像状态
-          echo "=== 镜像状态 ==="
-          ll-cli repo show testing 2>/dev/null || true
-          
+          echo "=== 查询所有可用的 Runtime ==="
+          ll-cli search --type=runtime --show-all-version --keyword=gtk4 || true
+          echo "=== 查询 Base Runtime ==="
+          ll-cli search --type=runtime --show-all-version --keyword=base || true
+          echo "=== 查询指定仓库的 GTK4 Runtime ==="
+          ll-cli search --type=runtime --show-all-version --keyword=gtk4 --repo=testing || true
+
       - name: Generate linglong.yaml
         run: |
           cat > linglong.yaml << 'YAML_EOF'
@@ -123,16 +102,16 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
-          # 修正版本号格式：从4位改为3位
+          # 使用与社区测试源匹配的版本号（3位数字）
           base: org.deepin.base/25.2.2
-          runtime: org.deepin.runtime.gtk4/25.2.2  # 改为3位数字
+          runtime: org.deepin.runtime.gtk4/25.2.2
           build: |
-            # 复制文件到玲珑容器标准路径
+            # 构建脚本：复制文件到玲珑容器标准路径
             mkdir -p $PREFIX/bin
             mkdir -p $PREFIX/share/applications
             mkdir -p $PREFIX/share/icons/hicolor/128x128/apps
             
-            # 复制主程序
+            # 复制主程序和相关文件
             cp -r linglong-project/clash-verge $PREFIX/
             cp -r linglong-project/AppRun.sh $PREFIX/
             cp -r linglong-project/sidecar $PREFIX/ 2>/dev/null || true
@@ -149,16 +128,33 @@ jobs:
           YAML_EOF
           echo "=== linglong.yaml ==="
           cat linglong.yaml
+
       - name: Build Linglong package
-        uses: onezero1-tech/linglong-builder-action@main
-        with:
-          format: layer
-          # 添加环境变量设置，确保UTF-8 locale
-          env_vars: LANG=C.UTF-8,LC_ALL=C.UTF-8
+        run: |
+          # 尝试使用内核级 OverlayFS，如果失败则切换到 Fuse-OverlayFS
+          echo "尝试使用内核 OverlayFS..."
+          if ! ll-builder build --skip-fetch-source; then
+            echo "⚠️ 内核 OverlayFS 失败，尝试使用 Fuse-OverlayFS..."
+            # 设置环境变量，强制使用 Fuse-OverlayFS
+            export LINGLONG_OVERLAYFS_BACKEND=fuse-overlayfs
+            # 再次尝试构建
+            ll-builder build --skip-fetch-source
+          fi
+
+      - name: Export Linglong package
+        run: |
+          # 导出为 layer 格式
+          ll-builder export --layer --no-develop || true
+          # 查看生成的文件
+          echo "=== 生成的文件 ==="
+          ls -la *.layer 2>/dev/null || echo "No layer files found"
+          find . -name "*.layer" -o -name "*.uab" | head -20
 
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
         with:
           name: clash-verge-rev-linglong
-          path: ./*.layer
-          if-no-files-found: error
+          path: |
+            *.layer
+            *.uab
+          if-no-files-found: warn
