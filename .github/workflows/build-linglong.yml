@@ -35,6 +35,7 @@ jobs:
           if_no_artifact_found: fail
 
       - name: Verify and prepare files
+        shell: bash -e {0}      # 原来是 sh -e {0}
         run: |
           set -e
           echo "=== linglong-project 目录结构 ==="
