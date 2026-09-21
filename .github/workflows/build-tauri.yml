@@ -80,6 +80,7 @@ jobs:
         run: pnpm install
 
       - name: Download required resources
+        shell: bash -e {0}      # 原来是 sh -e {0}
         run: |
           set -e
           
@@ -162,6 +163,7 @@ jobs:
           ls -la src-tauri/resources/ 2>/dev/null || true
 
       - name: Verify required resources
+        shell: bash -e {0}      # 原来是 sh -e {0}
         run: |
           set -e
           # 检查必要的资源文件
