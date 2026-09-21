@@ -9,7 +9,6 @@ on:
 jobs:
   build-tauri:
     runs-on: ubuntu-24.04
-    # 使用 deepin 25 容器确保 glibc 兼容性
     container:
       image: linuxdeepin/deepin:25
       options: --user root --privileged
@@ -18,14 +17,19 @@ jobs:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: "safe.directory"
       GIT_CONFIG_VALUE_0: "*"
-      LANG: C.UTF-8
-      LC_ALL: C.UTF-8
 
     steps:
+      - name: Install Git (Required for submodules)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git
+          git --version
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
+          fetch-depth: 0
 
       - name: Install system dependencies
         run: |
@@ -42,6 +46,7 @@ jobs:
             pkg-config \
             build-essential \
             curl wget git unzip file binutils
+
 
       - name: Install Node.js 22
         uses: actions/setup-node@v4
