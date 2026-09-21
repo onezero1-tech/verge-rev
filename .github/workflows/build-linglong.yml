@@ -124,7 +124,7 @@ jobs:
           # 使用 ll-killer-go 构建玲珑包
           # 这将创建一个 Debian 12 容器环境并在其中构建
           # 使用 layer build 直接生成 layer 文件，完全绕过 ll-builder
-          ll-killer layer build -- ./build.sh
+          ll-killer layer build  --no-post-setup -- ./build.sh
 
       - name: Verify Linglong package
         run: |
