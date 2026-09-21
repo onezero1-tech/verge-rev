@@ -9,11 +9,17 @@ on:
 jobs:
   build-tauri:
     runs-on: ubuntu-24.04
+    # 使用 deepin 25 容器确保 glibc 兼容性
+    container:
+      image: linuxdeepin/deepin:25
+      options: --user root --privileged
 
     env:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: "safe.directory"
       GIT_CONFIG_VALUE_0: "*"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
 
     steps:
       - name: Checkout
@@ -89,18 +95,19 @@ jobs:
             cp -r src-tauri/icons linglong-project/icons
           fi
 
+          # 创建 AppRun.sh 启动脚本
           cat > linglong-project/AppRun.sh << 'EOF'
           #!/bin/bash
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-          export GIO_LAUNCHED_DESKTOP_FILE_PID=$$
-          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export GIO_LAUNCHED_DESKTOP_FILE_PID=$$           DIR="$(cd "$(dirname "$0")" && pwd)"
           export PATH="$DIR/sidecar:$PATH"
           chmod +x "$DIR/sidecar"/* 2>/dev/null || true
           exec "$DIR/clash-verge" "$@"
           EOF
           chmod +x linglong-project/AppRun.sh
 
+          # 创建 desktop 文件
           mkdir -p linglong-project/share/applications
           mkdir -p linglong-project/share/icons/hicolor/256x256/apps
           cat > linglong-project/share/applications/io.github.clash-verge-rev.desktop << 'EOF'
@@ -114,6 +121,7 @@ jobs:
           Terminal=false
           EOF
 
+          # 复制图标
           if [ -f linglong-project/icons/128x128.png ]; then
             cp linglong-project/icons/128x128.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
           elif [ -f linglong-project/icons/icon.png ]; then
