@@ -35,13 +35,12 @@ jobs:
           if_no_artifact_found: fail
 
       - name: Verify and prepare files
-        shell: bash -e {0}      # 原来是 sh -e {0}
+        shell: bash -e {0}
         run: |
           set -e
           echo "=== linglong-project 目录结构 ==="
           find linglong-project -type f | sort
-          
-          # 验证必要文件
+
           REQUIRED_FILES=(
             "linglong-project/clash-verge"
             "linglong-project/AppRun.sh"
@@ -50,38 +49,30 @@ jobs:
             "linglong-project/resources/geoip.dat"
             "linglong-project/resources/geosite.dat"
           )
-          
+
           for file in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "$file" ]; then
               echo "❌ 缺少必要文件: $file"
               exit 1
             else
               echo "✅ 找到文件: $file"
-              chmod +x "$file" 2>/dev/null || true
             fi
           done
-          
-          # 验证 sidecar 目录
+
           if [ -d "linglong-project/sidecar" ]; then
             echo "✅ sidecar 目录存在"
             ls -la linglong-project/sidecar/
-            chmod +x linglong-project/sidecar/* 2>/dev/null || true
           fi
 
       - name: Install ll-killer-go and Linglong Builder
         run: |
-          # 安装基础依赖
           sudo apt-get update
-          sudo apt-get install -y apt-file fuse-overlayfs erofs-utils wget
+          sudo apt-get install -y fuse-overlayfs erofs-utils wget
 
-          # 添加玲珑官方软件源 (Ubuntu 24.04)
           echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
           sudo apt-get update
-
-          # 安装官方玲珑构建工具集 (包含 ll-builder)
           sudo apt-get install -y linglong-builder linglong-box linglong-bin
 
-          # 安装 ll-killer-go
           wget https://github.com/System233/ll-killer-go/releases/latest/download/ll-killer-amd64 -O ll-killer
           chmod +x ll-killer
           sudo mv ll-killer /usr/local/bin/
@@ -89,124 +80,110 @@ jobs:
       - name: Create build script
         run: |
           set -e
-          
+
           cat > build.sh << 'EOF'
           #!/bin/bash
           set -e
-          
+
           echo "=========================================="
           echo "Clash Verge Rev 玲珑包构建脚本"
-          echo "=========================================="
           echo "PREFIX: ${PREFIX}"
           echo "TRIPLET: ${TRIPLET}"
           echo "KILLER_PACKER: ${KILLER_PACKER}"
           echo "=========================================="
-          
-          # 验证 PREFIX 环境变量
+
           if [ -z "$PREFIX" ]; then
             echo "❌ PREFIX 环境变量未设置"
             exit 1
           fi
-          
-          # 创建完整的目录结构
+
+          APP_ID="io.github.clash-verge-rev"
+          DATA_ID="io.github.clash-verge-rev.clash-verge-rev"
+          TRIPLET_SUFFIX="-x86_64-unknown-linux-gnu"
+
+          BIN_DIR="$PREFIX/bin"
+          LIB_DIR="$PREFIX/lib"
+          RES_DIR="$LIB_DIR/clash-verge"
+
+          # 关键布局（模拟 Tauri deb 包）：
+          #   files/bin/clash-verge              主程序（sidecar 必须与主程序同目录）
+          #   files/lib/clash-verge/resources/   资源（resource_dir = exe_dir/../lib/...）
+          #   files/lib/<identifier>、lib/Clash Verge、lib/resources  各种解析变体兜底
+          #   files/resources、files/sidecar     AppRun.sh 兜底路径
+
           echo "=== 创建目录结构 ==="
-          mkdir -p $PREFIX/bin
-          mkdir -p $PREFIX/lib/x86_64-linux-gnu
-          mkdir -p $PREFIX/share/applications
-          mkdir -p $PREFIX/share/icons/hicolor/128x128/apps
-          mkdir -p $PREFIX/share/icons/hicolor/256x256/apps
-          mkdir -p $PREFIX/share/icons/hicolor/scalable/apps
-          mkdir -p $PREFIX/resources
-          mkdir -p $PREFIX/sidecar
-          mkdir -p $PREFIX/share/dbus-1/services
-          
-          # 复制主程序
-          echo "=== 复制主程序 ==="
-          if [ -f "linglong-project/clash-verge" ]; then
-            install -m 755 linglong-project/clash-verge $PREFIX/bin/clash-verge
-            install -m 755 linglong-project/clash-verge $PREFIX/clash-verge
-            echo "✅ clash-verge 已安装"
-          else
-            echo "❌ clash-verge 不存在"
-            exit 1
-          fi
-          
-          # 复制启动脚本
+          mkdir -p "$BIN_DIR/bin"
+          mkdir -p "$LIB_DIR/x86_64-linux-gnu"
+          mkdir -p "$RES_DIR/resources" "$RES_DIR/bin"
+          mkdir -p "$LIB_DIR/resources"
+          mkdir -p "$PREFIX/resources"
+          mkdir -p "$PREFIX/sidecar"
+          mkdir -p "$PREFIX/share/applications"
+          mkdir -p "$PREFIX/share/icons/hicolor/128x128/apps"
+          mkdir -p "$PREFIX/share/icons/hicolor/256x256/apps"
+          mkdir -p "$PREFIX/share/icons/hicolor/scalable/apps"
+
+          echo "=== 复制主程序到 files/bin ==="
+          install -m 755 linglong-project/clash-verge "$BIN_DIR/clash-verge"
+          ln -f "$BIN_DIR/clash-verge" "$PREFIX/clash-verge"
+
           echo "=== 复制启动脚本 ==="
-          if [ -f "linglong-project/AppRun.sh" ]; then
-            install -m 755 linglong-project/AppRun.sh $PREFIX/AppRun.sh
-            echo "✅ AppRun.sh 已安装"
-          else
-            echo "❌ AppRun.sh 不存在"
-            exit 1
-          fi
-          
-          # 复制服务安装脚本
-          echo "=== 复制服务安装脚本 ==="
+          install -m 755 linglong-project/AppRun.sh "$PREFIX/AppRun.sh"
+
+          echo "=== 复制服务安装脚本（覆盖应用查找的所有候选路径） ==="
           if [ -f "linglong-project/clash-verge-service-install" ]; then
-            install -m 755 linglong-project/clash-verge-service-install $PREFIX/clash-verge-service-install
-            echo "✅ clash-verge-service-install 已安装"
+            install -m 755 linglong-project/clash-verge-service-install "$BIN_DIR/clash-verge-service-install"
+            cp -f "$BIN_DIR/clash-verge-service-install" "$BIN_DIR/bin/clash-verge-service-install"
+            cp -f "$BIN_DIR/clash-verge-service-install" "$PREFIX/clash-verge-service-install"
+            cp -f "$BIN_DIR/clash-verge-service-install" "$RES_DIR/bin/clash-verge-service-install"
           else
             echo "⚠️ clash-verge-service-install 不存在，跳过"
           fi
-          
-          # 复制资源文件
-          echo "=== 复制资源文件 ==="
-          if [ -d "linglong-project/resources" ]; then
-            cp -rv linglong-project/resources/* $PREFIX/resources/
-            echo "✅ 资源文件已复制:"
-            find $PREFIX/resources -type f | while read f; do
-              echo "  - $f ($(stat -c%s "$f") bytes)"
-            done
-          else
-            echo "⚠️ resources 目录不存在"
+          if [ -f "linglong-project/clash-verge-service" ]; then
+            install -m 755 linglong-project/clash-verge-service "$BIN_DIR/clash-verge-service"
           fi
-          
-          # 复制 sidecar
-          echo "=== 复制 sidecar ==="
+
+          echo "=== 复制 sidecar 内核（去掉 target triple 后缀，与主程序同目录） ==="
           if [ -d "linglong-project/sidecar" ]; then
-            cp -rv linglong-project/sidecar/* $PREFIX/sidecar/
-            chmod +x $PREFIX/sidecar/* 2>/dev/null || true
-            echo "✅ Sidecar 文件已复制:"
-            find $PREFIX/sidecar -type f
+            for f in linglong-project/sidecar/*; do
+              [ -f "$f" ] || continue
+              base="$(basename "$f")"
+              name="${base%$TRIPLET_SUFFIX}"
+              echo "  $base -> $name"
+              install -m 755 "$f" "$BIN_DIR/$name"
+              ln -f "$BIN_DIR/$name" "$PREFIX/sidecar/$name"
+              ln -f "$BIN_DIR/$name" "$RES_DIR/$name"
+            done
           else
             echo "⚠️ sidecar 目录不存在"
           fi
-          
-          # 复制图标
-          echo "=== 复制图标 ==="
-          if [ -d "linglong-project/icons" ]; then
-            # 复制到标准图标目录
-            if [ -d "linglong-project/icons/128x128" ]; then
-              cp -rv linglong-project/icons/128x128/* $PREFIX/share/icons/hicolor/128x128/apps/ 2>/dev/null || true
-            fi
-            if [ -d "linglong-project/icons/256x256" ]; then
-              cp -rv linglong-project/icons/256x256/* $PREFIX/share/icons/hicolor/256x256/apps/ 2>/dev/null || true
-            fi
-            if [ -d "linglong-project/icons/scalable" ]; then
-              cp -rv linglong-project/icons/scalable/* $PREFIX/share/icons/hicolor/scalable/apps/ 2>/dev/null || true
-            fi
-            
-            # 如果是单个图标文件
-            if [ -f "linglong-project/icons/128x128.png" ]; then
-              cp linglong-project/icons/128x128.png $PREFIX/share/icons/hicolor/128x128/apps/io.github.clash-verge-rev.png
-            fi
-            if [ -f "linglong-project/icons/icon.png" ]; then
-              cp linglong-project/icons/icon.png $PREFIX/share/icons/hicolor/128x128/apps/io.github.clash-verge-rev.png
-            fi
-            
-            echo "✅ 图标已复制"
-            find $PREFIX/share/icons -type f
-          fi
-          
-          # 复制 desktop 文件
-          echo "=== 复制 desktop 文件 ==="
-          if [ -d "linglong-project/share/applications" ]; then
-            cp -rv linglong-project/share/applications/* $PREFIX/share/applications/
-            echo "✅ Desktop 文件已复制"
+
+          echo "=== 复制资源文件（覆盖 resource_dir 各候选路径） ==="
+          if [ -d "linglong-project/resources" ]; then
+            cp -rv linglong-project/resources/* "$PREFIX/resources/"
+            for r in Country.mmdb geoip.dat geosite.dat; do
+              if [ ! -f "$PREFIX/resources/$r" ]; then
+                echo "❌ 缺少资源文件: $r"
+                exit 1
+              fi
+              ln -f "$PREFIX/resources/$r" "$RES_DIR/resources/$r"
+              ln -f "$PREFIX/resources/$r" "$LIB_DIR/resources/$r"
+              ln -f "$PREFIX/resources/$r" "$RES_DIR/$r"
+            done
           else
-            # 创建默认的 desktop 文件
-            cat > $PREFIX/share/applications/io.github.clash-verge-rev.desktop << 'DESKTOP'
+            echo "❌ resources 目录不存在"
+            exit 1
+          fi
+
+          echo "=== resource_dir 兜底（identifier / productName 符号链接） ==="
+          ln -sfn clash-verge "$LIB_DIR/$DATA_ID"
+          ln -sfn clash-verge "$LIB_DIR/Clash Verge"
+
+          echo "=== desktop 文件 ==="
+          if [ -d "linglong-project/share/applications" ]; then
+            cp -rv linglong-project/share/applications/* "$PREFIX/share/applications/"
+          else
+            cat > "$PREFIX/share/applications/io.github.clash-verge-rev.desktop" << 'DESKTOP'
           [Desktop Entry]
           Name=Clash Verge Rev
           Comment=Clash Meta GUI
@@ -217,105 +194,77 @@ jobs:
           Terminal=false
           StartupNotify=true
           DESKTOP
-            echo "✅ 默认 Desktop 文件已创建"
           fi
-          
-          # 复制其他 share 文件
+
+          echo "=== 图标 ==="
+          ICON_SRC=""
+          if [ -f "linglong-project/icons/128x128.png" ]; then
+            ICON_SRC="linglong-project/icons/128x128.png"
+          elif [ -f "linglong-project/icons/icon.png" ]; then
+            ICON_SRC="linglong-project/icons/icon.png"
+          fi
+          if [ -n "$ICON_SRC" ]; then
+            install -m 644 "$ICON_SRC" "$PREFIX/share/icons/hicolor/128x128/apps/$APP_ID.png"
+            install -m 644 "$ICON_SRC" "$PREFIX/share/icons/hicolor/256x256/apps/$APP_ID.png"
+          fi
+          if [ -d "linglong-project/icons/scalable" ]; then
+            cp -rv linglong-project/icons/scalable/* "$PREFIX/share/icons/hicolor/scalable/apps/" 2>/dev/null || true
+          fi
+
+          echo "=== 其他 share 文件 ==="
           if [ -d "linglong-project/share" ]; then
-            echo "=== 复制其他 share 文件 ==="
-            # 避免重复复制 applications 和 icons
-            find linglong-project/share -type f -not -path "*/applications/*" -not -path "*/icons/*" | while read f; do
-              target_dir="$PREFIX/share/$(dirname "${f#linglong-project/share/}")"
-              mkdir -p "$target_dir"
-              cp -v "$f" "$target_dir/"
+            find linglong-project/share -type f -not -path "*/applications/*" | while read -r f; do
+              rel="${f#linglong-project/share/}"
+              mkdir -p "$PREFIX/share/$(dirname "$rel")"
+              cp -v "$f" "$PREFIX/share/$rel"
             done
           fi
-          
-          # 修复动态库路径
-          echo "=== 修复动态库路径 ==="
-          find $PREFIX -type f -name "*.so*" -exec patchelf --set-rpath '$ORIGIN:$ORIGIN/../lib:$ORIGIN/../lib/x86_64-linux-gnu:/runtime/lib' {} \; 2>/dev/null || true
-          echo "✅ 动态库路径已修复"
-          
-          # 修复可执行文件权限
+
           echo "=== 修复文件权限 ==="
-          chmod +x $PREFIX/bin/clash-verge 2>/dev/null || true
-          chmod +x $PREFIX/clash-verge 2>/dev/null || true
-          chmod +x $PREFIX/AppRun.sh 2>/dev/null || true
-          chmod +x $PREFIX/clash-verge-service-install 2>/dev/null || true
-          
-          # 如果存在 sidecar 目录，设置权限
-          if [ -d "$PREFIX/sidecar" ]; then
-            find $PREFIX/sidecar -type f -exec chmod +x {} \; 2>/dev/null || true
-          fi
-          
-          # 创建符号链接（如果需要）
-          if [ ! -L "$PREFIX/clash-verge" ] && [ -f "$PREFIX/bin/clash-verge" ]; then
-            ln -sf $PREFIX/bin/clash-verge $PREFIX/clash-verge 2>/dev/null || true
-          fi
-          
-          # 验证构建结果
+          find "$PREFIX/sidecar" -type f -exec chmod 755 {} \; 2>/dev/null || true
+          chmod 755 "$PREFIX/bin/clash-verge" "$PREFIX/AppRun.sh" 2>/dev/null || true
+
           echo "=== 构建结果验证 ==="
-          echo "文件总数: $(find $PREFIX -type f | wc -l)"
-          echo "目录总数: $(find $PREFIX -type d | wc -l)"
-          echo "总大小: $(du -sh $PREFIX | cut -f1)"
-          
-          # 验证核心文件
-          if [ -f "$PREFIX/bin/clash-verge" ]; then
-            echo "验证通过: clash-verge"
+          for f in \
+            "$PREFIX/bin/clash-verge" \
+            "$PREFIX/AppRun.sh" \
+            "$PREFIX/share/applications/$APP_ID.desktop" \
+            "$PREFIX/resources/Country.mmdb" \
+            "$PREFIX/lib/clash-verge/resources/Country.mmdb" \
+            "$PREFIX/lib/resources/Country.mmdb"; do
+            if [ -f "$f" ]; then
+              echo "✅ $f"
+            else
+              echo "❌ 缺少: $f"
+              exit 1
+            fi
+          done
+
+          if [ -f "$PREFIX/bin/verge-mihomo" ]; then
+            echo "✅ 内核: $PREFIX/bin/verge-mihomo ($(stat -c%s "$PREFIX/bin/verge-mihomo") bytes)"
           else
-            echo "验证失败: clash-verge 不存在"
-            exit 1
+            echo "⚠️ 未找到 verge-mihomo 内核（sidecar 可能下载失败）"
           fi
-          
-          if [ -f "$PREFIX/AppRun.sh" ]; then
-            echo "验证通过: AppRun.sh"
-          else
-            echo "验证失败: AppRun.sh 不存在"
-            exit 1
-          fi
-          
-          if [ -f "$PREFIX/share/applications/io.github.clash-verge-rev.desktop" ]; then
-            echo "验证通过: desktop 文件"
-          else
-            echo "验证失败: desktop 文件不存在"
-            exit 1
-          fi
-          
-          # 验证资源文件（可选）
-          if [ -f "$PREFIX/resources/Country.mmdb" ]; then
-            echo "资源文件: Country.mmdb 存在 ($(stat -c%s "$PREFIX/resources/Country.mmdb") bytes)"
-          else
-            echo "警告: Country.mmdb 不存在"
-          fi
-          
-          if [ -f "$PREFIX/resources/geoip.dat" ]; then
-            echo "资源文件: geoip.dat 存在 ($(stat -c%s "$PREFIX/resources/geoip.dat") bytes)"
-          else
-            echo "警告: geoip.dat 不存在"
-          fi
-          
-          if [ -f "$PREFIX/resources/geosite.dat" ]; then
-            echo "资源文件: geosite.dat 存在 ($(stat -c%s "$PREFIX/resources/geosite.dat") bytes)"
-          else
-            echo "警告: geosite.dat 不存在"
-          fi
-          
+
           echo ""
-          echo "=== 构建完成，目录结构 ==="
-          find $PREFIX -type f | sort | head -50
+          echo "文件总数: $(find "$PREFIX" -type f | wc -l)"
+          echo "总大小: $(du -sh "$PREFIX" | cut -f1)"
+          echo ""
+          echo "=== 目录结构（前 60 项） ==="
+          find "$PREFIX" | sort | head -60
           echo ""
           echo "=========================================="
           echo "构建成功！"
           echo "=========================================="
           EOF
-          
+
           chmod +x build.sh
           echo "✅ build.sh 创建完成"
 
       - name: Create linglong.yaml
         run: |
           set -e
-          
+
           cat > linglong.yaml << 'YAML_EOF'
           version: '1'
           package:
@@ -336,34 +285,22 @@ jobs:
           build: |
             ./build.sh
           YAML_EOF
-          
+
           echo "=== linglong.yaml ==="
           cat linglong.yaml
 
       - name: Build with ll-killer layer build
-        shell:  bash -e {0} 
+        shell: bash -e {0}
         run: |
           set -e
-          
-          echo "=== 使用 ll-killer layer build 构建 ==="
-          echo "构建命令: ll-killer layer build --no-post-setup -- ./build.sh"
-          
-          # 使用 ll-killer layer build 构建
-          # --no-post-setup: 跳过后处理步骤
-          # -- ./build.sh: 执行构建脚本
           ll-killer layer build --no-post-setup -- ./build.sh
-          
-          echo ""
+
           echo "=== 构建完成，检查输出 ==="
-          
-          # 检查生成的文件
           if ls *.layer 2>/dev/null; then
             echo "✅ 找到 layer 文件"
             ls -la *.layer
           else
             echo "❌ 未找到 layer 文件"
-            echo "检查 linglong 目录..."
-            ls -la linglong/ 2>/dev/null || true
             find . -name "*.layer" -o -name "*.uab" 2>/dev/null || true
             exit 1
           fi
@@ -371,50 +308,23 @@ jobs:
       - name: Verify and list output files
         run: |
           set -e
-          
-          echo "=== 构建输出文件 ==="
-          
-          # 查找所有 layer 和 uab 文件
           LAYER_FILES=$(find . -name "*.layer" -not -path "./linglong/*" 2>/dev/null)
           UAB_FILES=$(find . -name "*.uab" -not -path "./linglong/*" 2>/dev/null)
-          
+
           if [ -n "$LAYER_FILES" ]; then
             echo "✅ Layer 文件:"
-            echo "$LAYER_FILES"
-            echo ""
-            echo "文件详情:"
             for f in $LAYER_FILES; do
               echo "  - $(basename $f): $(stat -c%s $f) bytes"
-              file "$f"
             done
-          else
-            echo "⚠️ 未找到 layer 文件"
           fi
-          
           if [ -n "$UAB_FILES" ]; then
             echo "✅ UAB 文件:"
-            echo "$UAB_FILES"
-            echo ""
-            echo "文件详情:"
             for f in $UAB_FILES; do
               echo "  - $(basename $f): $(stat -c%s $f) bytes"
-              file "$f"
             done
-          else
-            echo "⚠️ 未找到 UAB 文件"
           fi
-          
-          # 检查 linglong 目录
-          if [ -d "linglong" ]; then
-            echo ""
-            echo "=== linglong 目录结构 ==="
-            find linglong -type f | head -30
-          fi
-          
-          # 如果没有找到任何输出文件，则报错
           if [ -z "$LAYER_FILES" ] && [ -z "$UAB_FILES" ]; then
             echo "❌ 未找到任何输出文件"
-            echo "检查构建日志..."
             exit 1
           fi
 
