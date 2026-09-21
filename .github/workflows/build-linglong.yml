@@ -331,6 +331,7 @@ jobs:
           cat linglong.yaml
 
       - name: Build with ll-killer layer build
+        shell:  bash -e {0} 
         run: |
           set -e
           
