@@ -259,36 +259,46 @@ jobs:
           echo "目录总数: $(find $PREFIX -type d | wc -l)"
           echo "总大小: $(du -sh $PREFIX | cut -f1)"
           
-          # 验证必要文件
-          REQUIRED_FILES=(
-            "$PREFIX/bin/clash-verge"
-            "$PREFIX/AppRun.sh"
-            "$PREFIX/share/applications/io.github.clash-verge-rev.desktop"
-          ]
+          # 验证核心文件
+          if [ -f "$PREFIX/bin/clash-verge" ]; then
+            echo "验证通过: clash-verge"
+          else
+            echo "验证失败: clash-verge 不存在"
+            exit 1
+          fi
           
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ 缺少必要文件: $file"
-              exit 1
-            else
-              echo "✅ $file"
-            fi
-          done
+          if [ -f "$PREFIX/AppRun.sh" ]; then
+            echo "验证通过: AppRun.sh"
+          else
+            echo "验证失败: AppRun.sh 不存在"
+            exit 1
+          fi
           
-          # 验证资源文件
-          RESOURCE_FILES=(
-            "$PREFIX/resources/Country.mmdb"
-            "$PREFIX/resources/geoip.dat"
-            "$PREFIX/resources/geosite.dat"
-          )
+          if [ -f "$PREFIX/share/applications/io.github.clash-verge-rev.desktop" ]; then
+            echo "验证通过: desktop 文件"
+          else
+            echo "验证失败: desktop 文件不存在"
+            exit 1
+          fi
           
-          for file in "${RESOURCE_FILES[@]}"; do
-            if [ -f "$file" ]; then
-              echo "✅ 资源文件: $file ($(stat -c%s "$file") bytes)"
-            else
-              echo "⚠️ 可选资源文件缺失: $file"
-            fi
-          done
+          # 验证资源文件（可选）
+          if [ -f "$PREFIX/resources/Country.mmdb" ]; then
+            echo "资源文件: Country.mmdb 存在 ($(stat -c%s "$PREFIX/resources/Country.mmdb") bytes)"
+          else
+            echo "警告: Country.mmdb 不存在"
+          fi
+          
+          if [ -f "$PREFIX/resources/geoip.dat" ]; then
+            echo "资源文件: geoip.dat 存在 ($(stat -c%s "$PREFIX/resources/geoip.dat") bytes)"
+          else
+            echo "警告: geoip.dat 不存在"
+          fi
+          
+          if [ -f "$PREFIX/resources/geosite.dat" ]; then
+            echo "资源文件: geosite.dat 存在 ($(stat -c%s "$PREFIX/resources/geosite.dat") bytes)"
+          else
+            echo "警告: geosite.dat 不存在"
+          fi
           
           echo ""
           echo "=== 构建完成，目录结构 ==="
