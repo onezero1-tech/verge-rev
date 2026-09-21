@@ -41,16 +41,23 @@ jobs:
           ls -la linglong-project/clash-verge
           file linglong-project/clash-verge
 
-      - name: Install ll-killer-go
+      - name: Install ll-killer-go and Linglong Builder
         run: |
-          # 安装 ll-killer-go 工具
+          # 安装基础依赖
+          sudo apt-get update
+          sudo apt-get install -y apt-file fuse-overlayfs erofs-utils wget
+
+          # 添加玲珑官方软件源 (Ubuntu 24.04)
+          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          sudo apt-get update
+
+          # 安装官方玲珑构建工具集 (包含 ll-builder)
+          sudo apt-get install -y linglong-builder linglong-box linglong-bin
+
+          # 安装 ll-killer-go
           wget https://github.com/System233/ll-killer-go/releases/latest/download/ll-killer-amd64 -O ll-killer
           chmod +x ll-killer
           sudo mv ll-killer /usr/local/bin/
-
-          # 安装依赖
-          sudo apt-get update
-          sudo apt-get install -y apt-file fuse-overlayfs erofs-utils
 
       - name: Create build script
         run: |
