@@ -17,7 +17,6 @@ jobs:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: "safe.directory"
       GIT_CONFIG_VALUE_0: "*"
-      # 设置显示环境，避免 GTK 相关问题
       DISPLAY: ":99"
       GDK_BACKEND: "x11"
 
@@ -49,7 +48,7 @@ jobs:
             pkg-config \
             build-essential \
             curl wget git unzip file binutils xvfb xauth
-            
+
       - name: Setup virtual display
         run: |
           Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
@@ -80,78 +79,25 @@ jobs:
         run: pnpm install
 
       - name: Download required resources
-        shell: bash -e {0}      # 原来是 sh -e {0}
+        shell: bash -e {0}
         run: |
           set -e
-          
-          # 创建资源目录
           mkdir -p src-tauri/resources
-          
-          # 定义资源文件URL
+
           GEOIP_URL="https://github.com/Dreamacro/maxmind-geoip/releases/latest/download/Country.mmdb"
           GEOSITE_URL="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
           GEOIP_DAT_URL="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
-          
-          # 下载资源文件
-          echo "=== 正在下载资源文件 ==="
-          
-          # Country.mmdb
-          if [ ! -f "src-tauri/resources/Country.mmdb" ]; then
-            echo "下载 Country.mmdb..."
-            curl -L -o src-tauri/resources/Country.mmdb "$GEOIP_URL"
-            echo "✅ Country.mmdb 下载完成: $(stat -c%s src-tauri/resources/Country.mmdb) bytes"
-          else
-            echo "ℹ️ Country.mmdb 已存在，跳过下载"
-          fi
-          
-          # geosite.dat
-          if [ ! -f "src-tauri/resources/geosite.dat" ]; then
-            echo "下载 geosite.dat..."
-            curl -L -o src-tauri/resources/geosite.dat "$GEOSITE_URL"
-            echo "✅ geosite.dat 下载完成: $(stat -c%s src-tauri/resources/geosite.dat) bytes"
-          else
-            echo "ℹ️ geosite.dat 已存在，跳过下载"
-          fi
-          
-          # geoip.dat
-          if [ ! -f "src-tauri/resources/geoip.dat" ]; then
-            echo "下载 geoip.dat..."
-            curl -L -o src-tauri/resources/geoip.dat "$GEOIP_DAT_URL"
-            echo "✅ geoip.dat 下载完成: $(stat -c%s src-tauri/resources/geoip.dat) bytes"
-          else
-            echo "ℹ️ geoip.dat 已存在，跳过下载"
-          fi
-          
-          # 验证资源文件
-          echo ""
-          echo "=== 资源文件验证 ==="
-          REQUIRED_FILES=(
-            "src-tauri/resources/Country.mmdb"
-            "src-tauri/resources/geoip.dat"
-            "src-tauri/resources/geosite.dat"
-          )
-          
-          ALL_FILES_VALID=true
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ 缺少必要资源文件: $file"
-              ALL_FILES_VALID=false
-            elif [ $(stat -c%s "$file") -eq 0 ]; then
-              echo "❌ 资源文件为空: $file"
-              ALL_FILES_VALID=false
-            else
-              echo "✅ 资源文件有效: $file ($(stat -c%s "$file") bytes)"
+
+          for entry in "Country.mmdb:$GEOIP_URL" "geosite.dat:$GEOSITE_URL" "geoip.dat:$GEOIP_DAT_URL"; do
+            name="${entry%%:*}"; url="${entry#*:}"
+            if [ ! -f "src-tauri/resources/$name" ] || [ "$(stat -c%s src-tauri/resources/$name)" -eq 0 ]; then
+              echo "下载 $name ..."
+              curl -fL -o "src-tauri/resources/$name" "$url"
             fi
+            [ -f "src-tauri/resources/$name" ] && [ "$(stat -c%s src-tauri/resources/$name)" -gt 0 ] \
+              || { echo "❌ 资源文件无效: $name"; exit 1; }
+            echo "✅ $name ($(stat -c%s src-tauri/resources/$name) bytes)"
           done
-          
-          if [ "$ALL_FILES_VALID" = "false" ]; then
-            echo ""
-            echo "❌ 资源文件验证失败，请检查网络连接或手动下载"
-            exit 1
-          fi
-          
-          echo ""
-          echo "=== 所有资源文件验证通过 ==="        
 
       - name: Download sidecars and resources (prebuild)
         run: |
@@ -161,50 +107,6 @@ jobs:
           ls -la src-tauri/sidecar/
           echo "=== src-tauri/resources/ ==="
           ls -la src-tauri/resources/ 2>/dev/null || true
-
-      - name: Verify required resources
-        shell: bash -e {0}      # 原来是 sh -e {0}
-        run: |
-          set -e
-          # 检查必要的资源文件
-          REQUIRED_FILES=(
-            "src-tauri/resources/Country.mmdb"
-            "src-tauri/resources/geoip.dat"
-            "src-tauri/resources/geosite.dat"
-          )
-          
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ 缺少必要资源文件: $file"
-              echo "尝试重新下载..."
-              
-              # 根据文件名重新下载
-              case "$file" in
-                *Country.mmdb)
-                  curl -L -o "$file" "https://github.com/Dreamacro/maxmind-geoip/releases/latest/download/Country.mmdb"
-                  ;;
-                *geosite.dat)
-                  curl -L -o "$file" "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
-                  ;;
-                *geoip.dat)
-                  curl -L -o "$file" "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
-                  ;;
-              esac
-              
-              # 再次验证
-              if [ -f "$file" ] && [ $(stat -c%s "$file") -gt 0 ]; then
-                echo "✅ 重新下载成功: $file"
-              else
-                echo "❌ 重新下载失败: $file"
-                exit 1
-              fi
-            else
-              echo "✅ 资源文件存在: $file ($(stat -c%s "$file") bytes)"
-            fi
-          done
-          
-          echo ""
-          echo "=== 所有资源文件验证通过 ==="
 
       - name: Build Tauri application (no bundle)
         run: |
@@ -216,43 +118,37 @@ jobs:
       - name: Generate service install script
         run: |
           set -e
-          # 创建服务安装脚本
           cat > target/release/clash-verge-service-install << 'EOF'
           #!/bin/bash
-          # Clash Verge Service 安装脚本（玲珑环境适配版）
+          # Clash Verge Service 安装脚本（玲珑环境占位版）
+          # 玲珑沙箱内没有 systemd 用户会话，应用检测失败后会自动回退内置模式运行内核。
           set -e
-          
-          APP_DIR="/opt/apps/io.github.clash-verge-rev/files"
+
+          APP_DIR="/opt/apps/io.github.clash-verge-rev/files/bin"
           SERVICE_NAME="clash-verge-service"
           USER_HOME="${HOME:-/home/user}"
-          INSTALL_DIR="${USER_HOME}/.local/share/io.github.clash-verge-rev.clash-verge-rev"
-          
-          # 创建必要的目录
-          mkdir -p "${INSTALL_DIR}"
+
           mkdir -p "${USER_HOME}/.config/systemd/user/"
-          
-          # 创建 systemd 用户服务
+
           cat > "${USER_HOME}/.config/systemd/user/${SERVICE_NAME}.service" << UNIT
           [Unit]
           Description=Clash Verge Service
           After=network.target
-          
+
           [Service]
           Type=simple
           ExecStart=${APP_DIR}/clash-verge-service
           Restart=on-failure
           RestartSec=5
-          User=${USER}
-          
+
           [Install]
           WantedBy=default.target
           UNIT
-          
-          # 重新加载 systemd
+
           systemctl --user daemon-reload || true
           systemctl --user enable ${SERVICE_NAME} || true
-          
-          echo "✅ Clash Verge Service 安装完成"
+
+          echo "Clash Verge Service 安装完成"
           EOF
           chmod +x target/release/clash-verge-service-install
 
@@ -260,85 +156,118 @@ jobs:
         run: |
           set -e
           mkdir -p linglong-project
-          
-          # 复制主程序
+
+          # 主程序
           cp target/release/clash-verge linglong-project/clash-verge
           chmod +x linglong-project/clash-verge
-          
-          # 复制服务安装脚本
+
+          # 服务二进制（如产物中存在则一并带走）
+          if [ -f target/release/clash-verge-service ]; then
+            cp target/release/clash-verge-service linglong-project/clash-verge-service
+            chmod +x linglong-project/clash-verge-service
+          fi
+
+          # 服务安装脚本
           cp target/release/clash-verge-service-install linglong-project/clash-verge-service-install
           chmod +x linglong-project/clash-verge-service-install
-          
-          # 复制 sidecar
+
+          # sidecar 内核
           cp -r src-tauri/sidecar linglong-project/sidecar 2>/dev/null || true
-          
-          # 复制资源文件（确保包含所有必要文件）
+
+          # 资源文件
           if [ -d "src-tauri/resources" ]; then
             cp -r src-tauri/resources linglong-project/resources
-            echo "=== 资源文件列表 ==="
             find linglong-project/resources -type f
           fi
-          
-          # 复制图标
+
+          # 图标
           if [ -d "src-tauri/icons" ]; then
             cp -r src-tauri/icons linglong-project/icons
           fi
 
-          # 创建 AppRun.sh 启动脚本
+          # ========= AppRun.sh 启动脚本（重写） =========
           cat > linglong-project/AppRun.sh << 'EOF'
           #!/bin/bash
+          # Clash Verge Rev - 玲珑环境启动脚本
           set -e
-          
-          # 设置基本环境
+
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          APP_ID="io.github.clash-verge-rev.clash-verge-rev"
+
+          # ---------- WebKit / 图形环境 ----------
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-          export GIO_LAUNCHED_DESKTOP_FILE_PID=$$           
-          # 设置图形环境
           export GDK_BACKEND=x11
-          export DISPLAY=${DISPLAY:-:0}
-          export XAUTHORITY=${XAUTHORITY:-/home/user/.Xauthority}
-          
-          # 设置库路径
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          export PATH="$DIR/sidecar:$PATH"
-          export LD_LIBRARY_PATH="$DIR/lib:$DIR/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
-          
-          # 设置用户数据目录
+          export DISPLAY="${DISPLAY:-:0}"
+          export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+          # 沙箱内无 GPU，强制软渲染，消除 kmsro/libEGL 报错
+          export LIBGL_ALWAYS_SOFTWARE=1
+
+          # ---------- 可执行文件 / 动态库搜索路径 ----------
+          export PATH="$DIR/bin:$DIR/sidecar:$PATH"
+          export LD_LIBRARY_PATH="$DIR/lib:$DIR/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+
+          # ---------- XDG 用户目录 ----------
           export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
           export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
           export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
-          
-          # 创建必要的用户目录
-          APP_DATA_DIR="$XDG_DATA_HOME/io.github.clash-verge-rev.clash-verge-rev"
-          mkdir -p "$APP_DATA_DIR"
-          mkdir -p "$XDG_CONFIG_HOME/io.github.clash-verge-rev.clash-verge-rev"
-          mkdir -p "$XDG_CACHE_HOME/io.github.clash-verge-rev.clash-verge-rev"
-          
-          # 复制资源文件到用户数据目录（如果不存在）
-          if [ -d "$DIR/resources" ]; then
-            for resource in Country.mmdb geoip.dat geosite.dat; do
-              if [ -f "$DIR/resources/$resource" ] && [ ! -f "$APP_DATA_DIR/$resource" ]; then
-                cp "$DIR/resources/$resource" "$APP_DATA_DIR/"
-                echo "已复制资源文件: $resource"
-              fi
-            done
-          fi
-          
-          # 设置 sidecar 权限
-          chmod +x "$DIR/sidecar"/* 2>/dev/null || true
-          
-          # 处理 systemd 服务（在容器内可能不可用）
-          if ! systemctl --user is-active clash-verge-service &>/dev/null; then
-            echo "警告: systemd 服务不可用，将使用内置模式运行"
+
+          APP_DATA_DIR="$XDG_DATA_HOME/$APP_ID"
+          APP_CONF_DIR="$XDG_CONFIG_HOME/$APP_ID"
+          mkdir -p "$APP_DATA_DIR" "$APP_CONF_DIR" "$XDG_CACHE_HOME/$APP_ID"
+
+          # ---------- 预置资源文件 ----------
+          for r in Country.mmdb geoip.dat geosite.dat; do
+            if [ -f "$DIR/resources/$r" ] && [ ! -f "$APP_DATA_DIR/$r" ]; then
+              cp -f "$DIR/resources/$r" "$APP_DATA_DIR/$r"
+              echo "已复制资源文件: $r"
+            fi
+          done
+
+          # ---------- 预置内核到数据目录（修复 verge-mihomo: No such file or directory） ----------
+          for c in verge-mihomo verge-mihomo-alpha; do
+            if [ ! -f "$APP_DATA_DIR/$c" ]; then
+              for src in "$DIR/bin/$c" "$DIR/sidecar/$c" "$DIR/lib/clash-verge/$c"; do
+                if [ -f "$src" ]; then
+                  cp -f "$src" "$APP_DATA_DIR/$c"
+                  chmod 755 "$APP_DATA_DIR/$c"
+                  echo "已复制内核文件: $c"
+                  break
+                fi
+              done
+            fi
+          done
+
+          # ---------- 强制关闭服务模式（使用内置/Sidecar 模式运行内核） ----------
+          force_service_off() {
+            local cfg="$1"
+            mkdir -p "$(dirname "$cfg")"
+            touch "$cfg"
+            if grep -q '^enable_service_mode:' "$cfg" 2>/dev/null; then
+              sed -i 's/^enable_service_mode:.*/enable_service_mode: false/' "$cfg"
+            else
+              printf 'enable_service_mode: false\n' >> "$cfg"
+            fi
+          }
+          force_service_off "$APP_DATA_DIR/verge.yaml"
+          force_service_off "$APP_CONF_DIR/verge.yaml"
+
+          # ---------- systemd 探测（沙箱内通常不可用 → 内置模式） ----------
+          if ! systemctl --user is-active clash-verge-service >/dev/null 2>&1; then
+            echo "提示: systemd 用户服务不可用，内核将以内置模式运行"
             export CLASH_VERGE_NO_SERVICE=1
           fi
-          
-          # 启动应用
-          exec "$DIR/clash-verge" "$@"
+
+          # ---------- 启动主程序（位于 bin/ 子目录） ----------
+          if [ -x "$DIR/bin/clash-verge" ]; then
+            exec "$DIR/bin/clash-verge" "$@"
+          else
+            exec "$DIR/clash-verge" "$@"
+          fi
           EOF
           chmod +x linglong-project/AppRun.sh
 
-          # 创建 desktop 文件
+          # desktop 文件
           mkdir -p linglong-project/share/applications
           mkdir -p linglong-project/share/icons/hicolor/256x256/apps
           cat > linglong-project/share/applications/io.github.clash-verge-rev.desktop << 'EOF'
@@ -353,7 +282,7 @@ jobs:
           StartupNotify=true
           EOF
 
-          # 复制图标
+          # 图标
           if [ -f linglong-project/icons/128x128.png ]; then
             cp linglong-project/icons/128x128.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
           elif [ -f linglong-project/icons/icon.png ]; then
