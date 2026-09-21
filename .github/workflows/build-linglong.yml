@@ -1,4 +1,4 @@
-name: Build Linglong Package with ll-killer-go
+name: Build Linglong Package
 
 on:
   workflow_dispatch:
@@ -10,9 +10,6 @@ on:
 jobs:
   build-linglong:
     runs-on: ubuntu-24.04
-    container:
-      image: debian:12
-      options: --privileged --cap-add=SYS_ADMIN --security-opt seccomp=unconfined --device /dev/fuse
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     env:
@@ -42,43 +39,54 @@ jobs:
           echo "=== linglong-project contents ==="
           find linglong-project -type f | head -40
           ls -la linglong-project/clash-verge
+          file linglong-project/clash-verge
 
-      # 安装构建所需的基础工具，并获取 ll-killer-go
-      - name: Install build dependencies and ll-killer-go
+      - name: Install ll-killer-go
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl wget git file gnupg apt-transport-https \
-            fuse3 fuse-overlayfs erofs-utils
+          # 安装 ll-killer-go 工具
+          wget https://github.com/System233/ll-killer-go/releases/latest/download/ll-killer-amd64 -O ll-killer
+          chmod +x ll-killer
+          sudo mv ll-killer /usr/local/bin/
 
-          # 下载 ll-killer-go (请根据最新版本调整 URL)
-          # 最新版本可在 https://github.com/System233/ll-killer-go/releases 查看
-          LL_KILLER_VERSION="v1.5.5"
-          curl -L -o /usr/local/bin/ll-killer \
-            "https://github.com/System233/ll-killer-go/releases/download/${LL_KILLER_VERSION}/ll-killer-amd64"
-          chmod +x /usr/local/bin/ll-killer
+          # 安装依赖
+          sudo apt-get update
+          sudo apt-get install -y apt-file fuse-overlayfs erofs-utils
 
-          # 验证安装
-          ll-killer -v
-
-
-
-      # 生成应用启动脚本
-      - name: Generate AppRun.sh
+      - name: Create build script
         run: |
-          cat > linglong-project/AppRun.sh << 'APPRUN_EOF'
+          cat > build.sh << 'EOF'
           #!/bin/bash
-          APPDIR="/opt/apps/io.github.clash-verge-rev/files"
-          LIBDIR="$APPDIR/lib/x86_64-linux-gnu"
-          export LD_LIBRARY_PATH="$LIBDIR:$LD_LIBRARY_PATH"
-          export WEBKIT_DISABLE_COMPOSITING_MODE=1
-          export WEBKIT_DISABLE_DMABUF_RENDERER=1
-          exec "$LIBDIR/ld-linux-x86-64.so.2" --library-path "$LIBDIR" "$APPDIR/clash-verge" "$@"
-          APPRUN_EOF
-          chmod +x linglong-project/AppRun.sh
+          set -e
+          
+          # 创建必要的目录结构
+          mkdir -p $PREFIX/bin
+          mkdir -p $PREFIX/share/applications
+          mkdir -p $PREFIX/share/icons/hicolor/128x128/apps
+          
+          # 复制主程序和相关文件
+          cp -r linglong-project/clash-verge $PREFIX/
+          cp -r linglong-project/AppRun.sh $PREFIX/
+          cp -r linglong-project/sidecar $PREFIX/ 2>/dev/null || true
+          cp -r linglong-project/resources $PREFIX/ 2>/dev/null || true
+          cp -r linglong-project/icons $PREFIX/ 2>/dev/null || true
+          cp -r linglong-project/share $PREFIX/
+          
+          # 设置执行权限
+          chmod +x $PREFIX/clash-verge
+          chmod +x $PREFIX/AppRun.sh
+          if [ -d "$PREFIX/sidecar" ]; then
+            chmod +x $PREFIX/sidecar/* 2>/dev/null || true
+          fi
+          
+          # 修复路径引用
+          find $PREFIX -type f -name "*.so*" -exec patchelf --set-rpath '$ORIGIN/../lib' {} \; 2>/dev/null || true
+          
+          echo "=== 构建完成 ==="
+          ls -la $PREFIX/
+          EOF
+          chmod +x build.sh
 
-      # 生成 linglong.yaml，供 ll-killer 使用
-      - name: Generate linglong.yaml
+      - name: Create linglong.yaml
         run: |
           cat > linglong.yaml << 'YAML_EOF'
           version: '1'
@@ -95,36 +103,41 @@ jobs:
             - local_socket
           command:
             - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          # 使用与社区测试源匹配的版本号
           base: org.deepin.base/25.2.2
           runtime: org.deepin.runtime.gtk4/25.2.2
           build: |
-            # ll-killer 会执行此脚本进行构建
-            mkdir -p $PREFIX/lib/x86_64-linux-gnu
-            cp -r linglong-project/clash-verge $PREFIX/
-            cp -r linglong-project/AppRun.sh $PREFIX/
-            cp -r linglong-project/sidecar $PREFIX/ 2>/dev/null || true
-            cp -r linglong-project/resources $PREFIX/ 2>/dev/null || true
-            cp -r linglong-project/icons $PREFIX/ 2>/dev/null || true
-            cp -r linglong-project/share $PREFIX/
-            # 复制预下载的 glibc + libstdc++ 等依赖
-            cp -a linglong-project/glibc-bundle/lib/x86_64-linux-gnu/. $PREFIX/lib/x86_64-linux-gnu/
-            chmod +x $PREFIX/clash-verge $PREFIX/AppRun.sh
-            if [ -d "$PREFIX/sidecar" ]; then chmod +x $PREFIX/sidecar/* 2>/dev/null || true; fi
+            ./build.sh
           YAML_EOF
-          echo "=== linglong.yaml generated ==="
+          echo "=== linglong.yaml ==="
           cat linglong.yaml
 
-      # 使用 ll-killer 的 layer 子命令构建 layer 文件
-      - name: Build Linglong layer with ll-killer
+      - name: Build Linglong package with ll-killer-go
         run: |
-          # ll-killer layer build 会读取当前目录的 linglong.yaml，执行 build 脚本，并生成 .layer 文件
-          # --no-strip 保留调试符号，可根据需要调整
-          ll-killer layer build
-          echo "=== Generated layer files ==="
-          find . -name "*.layer" -o -name "*.uab" | head -20
-          ls -la *.layer 2>/dev/null || echo "No layer files found"
+          # 使用 ll-killer-go 构建玲珑包
+          # 这将创建一个 Debian 12 容器环境并在其中构建
+          ll-killer build --ptrace -- ./build.sh
+          
+          # 提交构建内容
+          ll-killer commit --skip-output-check --skip-strip-symbols
+          
+          # 导出 layer 文件
+          ll-killer export --layer
 
-      # 上传生成的 layer 文件
+      - name: Verify Linglong package
+        run: |
+          echo "=== 生成的文件 ==="
+          ls -la *.layer 2>/dev/null || echo "No layer files found"
+          find . -name "*.layer" -o -name "*.uab" | head -20
+          
+          # 验证 layer 文件
+          if ls *.layer 2>/dev/null; then
+            echo "✅ 玲珑包构建成功"
+          else
+            echo "❌ 未找到 layer 文件"
+            exit 1
+          fi
+
       - name: Upload Linglong artifact
         uses: actions/upload-artifact@v4
         with:
