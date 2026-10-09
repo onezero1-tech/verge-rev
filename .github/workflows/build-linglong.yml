@@ -1,0 +1,341 @@
+name: Build Linglong Package
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Build Tauri Artifacts"]
+    types:
+      - completed
+
+jobs:
+  build-linglong:
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "*"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download Tauri artifact
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build-tauri.yml
+          name: linglong-project
+          path: linglong-project
+          workflow_conclusion: success
+          if_no_artifact_found: fail
+
+      - name: Verify and prepare files
+        shell: bash -e {0}
+        run: |
+          set -e
+          echo "=== linglong-project 目录结构 ==="
+          find linglong-project -type f | sort
+
+          REQUIRED_FILES=(
+            "linglong-project/clash-verge"
+            "linglong-project/AppRun.sh"
+            "linglong-project/clash-verge-service-install"
+            "linglong-project/resources/Country.mmdb"
+            "linglong-project/resources/geoip.dat"
+            "linglong-project/resources/geosite.dat"
+          )
+
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ 缺少必要文件: $file"
+              exit 1
+            else
+              echo "✅ 找到文件: $file"
+            fi
+          done
+
+          if [ -d "linglong-project/sidecar" ]; then
+            echo "✅ sidecar 目录存在"
+            ls -la linglong-project/sidecar/
+          fi
+
+      - name: Install ll-killer-go and Linglong Builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse-overlayfs erofs-utils wget
+
+          echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Ubuntu_24.04/ ./" | sudo tee /etc/apt/sources.list.d/linglong.list
+          sudo apt-get update
+          sudo apt-get install -y linglong-builder linglong-box linglong-bin
+
+          wget https://github.com/System233/ll-killer-go/releases/latest/download/ll-killer-amd64 -O ll-killer
+          chmod +x ll-killer
+          sudo mv ll-killer /usr/local/bin/
+
+      - name: Create build script
+        run: |
+          set -e
+
+          cat > build.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          echo "=========================================="
+          echo "Clash Verge Rev 玲珑包构建脚本"
+          echo "PREFIX: ${PREFIX}"
+          echo "TRIPLET: ${TRIPLET}"
+          echo "KILLER_PACKER: ${KILLER_PACKER}"
+          echo "=========================================="
+
+          if [ -z "$PREFIX" ]; then
+            echo "❌ PREFIX 环境变量未设置"
+            exit 1
+          fi
+
+          APP_ID="io.github.clash-verge-rev"
+          DATA_ID="io.github.clash-verge-rev.clash-verge-rev"
+          TRIPLET_SUFFIX="-x86_64-unknown-linux-gnu"
+
+          BIN_DIR="$PREFIX/bin"
+          LIB_DIR="$PREFIX/lib"
+          RES_DIR="$LIB_DIR/clash-verge"
+
+          # 关键布局（模拟 Tauri deb 包）：
+          #   files/bin/clash-verge              主程序（sidecar 必须与主程序同目录）
+          #   files/lib/clash-verge/resources/   资源（resource_dir = exe_dir/../lib/...）
+          #   files/lib/<identifier>、lib/Clash Verge、lib/resources  各种解析变体兜底
+          #   files/resources、files/sidecar     AppRun.sh 兜底路径
+
+          echo "=== 创建目录结构 ==="
+          mkdir -p "$BIN_DIR/bin"
+          mkdir -p "$LIB_DIR/x86_64-linux-gnu"
+          mkdir -p "$RES_DIR/resources" "$RES_DIR/bin"
+          mkdir -p "$LIB_DIR/resources"
+          mkdir -p "$PREFIX/resources"
+          mkdir -p "$PREFIX/sidecar"
+          mkdir -p "$PREFIX/share/applications"
+          mkdir -p "$PREFIX/share/icons/hicolor/128x128/apps"
+          mkdir -p "$PREFIX/share/icons/hicolor/256x256/apps"
+          mkdir -p "$PREFIX/share/icons/hicolor/scalable/apps"
+
+          echo "=== 复制主程序到 files/bin ==="
+          install -m 755 linglong-project/clash-verge "$BIN_DIR/clash-verge"
+          ln -f "$BIN_DIR/clash-verge" "$PREFIX/clash-verge"
+
+          echo "=== 复制启动脚本 ==="
+          install -m 755 linglong-project/AppRun.sh "$PREFIX/AppRun.sh"
+
+          echo "=== 复制服务安装脚本（覆盖应用查找的所有候选路径） ==="
+          if [ -f "linglong-project/clash-verge-service-install" ]; then
+            install -m 755 linglong-project/clash-verge-service-install "$BIN_DIR/clash-verge-service-install"
+            cp -f "$BIN_DIR/clash-verge-service-install" "$BIN_DIR/bin/clash-verge-service-install"
+            cp -f "$BIN_DIR/clash-verge-service-install" "$PREFIX/clash-verge-service-install"
+            cp -f "$BIN_DIR/clash-verge-service-install" "$RES_DIR/bin/clash-verge-service-install"
+          else
+            echo "⚠️ clash-verge-service-install 不存在，跳过"
+          fi
+          if [ -f "linglong-project/clash-verge-service" ]; then
+            install -m 755 linglong-project/clash-verge-service "$BIN_DIR/clash-verge-service"
+          fi
+
+          echo "=== 复制 sidecar 内核（去掉 target triple 后缀，与主程序同目录） ==="
+          if [ -d "linglong-project/sidecar" ]; then
+            for f in linglong-project/sidecar/*; do
+              [ -f "$f" ] || continue
+              base="$(basename "$f")"
+              name="${base%$TRIPLET_SUFFIX}"
+              echo "  $base -> $name"
+              install -m 755 "$f" "$BIN_DIR/$name"
+              ln -f "$BIN_DIR/$name" "$PREFIX/sidecar/$name"
+              ln -f "$BIN_DIR/$name" "$RES_DIR/$name"
+            done
+          else
+            echo "⚠️ sidecar 目录不存在"
+          fi
+
+          echo "=== 复制资源文件（覆盖 resource_dir 各候选路径） ==="
+          if [ -d "linglong-project/resources" ]; then
+            cp -rv linglong-project/resources/* "$PREFIX/resources/"
+            for r in Country.mmdb geoip.dat geosite.dat; do
+              if [ ! -f "$PREFIX/resources/$r" ]; then
+                echo "❌ 缺少资源文件: $r"
+                exit 1
+              fi
+              ln -f "$PREFIX/resources/$r" "$RES_DIR/resources/$r"
+              ln -f "$PREFIX/resources/$r" "$LIB_DIR/resources/$r"
+              ln -f "$PREFIX/resources/$r" "$RES_DIR/$r"
+            done
+          else
+            echo "❌ resources 目录不存在"
+            exit 1
+          fi
+
+          echo "=== resource_dir 兜底（identifier / productName 符号链接） ==="
+          ln -sfn clash-verge "$LIB_DIR/$DATA_ID"
+          ln -sfn clash-verge "$LIB_DIR/Clash Verge"
+
+          echo "=== desktop 文件 ==="
+          if [ -d "linglong-project/share/applications" ]; then
+            cp -rv linglong-project/share/applications/* "$PREFIX/share/applications/"
+          else
+            cat > "$PREFIX/share/applications/io.github.clash-verge-rev.desktop" << 'DESKTOP'
+          [Desktop Entry]
+          Name=Clash Verge Rev
+          Comment=Clash Meta GUI
+          Exec=/opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          Icon=io.github.clash-verge-rev
+          Type=Application
+          Categories=Network;
+          Terminal=false
+          StartupNotify=true
+          DESKTOP
+          fi
+
+          echo "=== 图标 ==="
+          ICON_SRC=""
+          if [ -f "linglong-project/icons/128x128.png" ]; then
+            ICON_SRC="linglong-project/icons/128x128.png"
+          elif [ -f "linglong-project/icons/icon.png" ]; then
+            ICON_SRC="linglong-project/icons/icon.png"
+          fi
+          if [ -n "$ICON_SRC" ]; then
+            install -m 644 "$ICON_SRC" "$PREFIX/share/icons/hicolor/128x128/apps/$APP_ID.png"
+            install -m 644 "$ICON_SRC" "$PREFIX/share/icons/hicolor/256x256/apps/$APP_ID.png"
+          fi
+          if [ -d "linglong-project/icons/scalable" ]; then
+            cp -rv linglong-project/icons/scalable/* "$PREFIX/share/icons/hicolor/scalable/apps/" 2>/dev/null || true
+          fi
+
+          echo "=== 其他 share 文件 ==="
+          if [ -d "linglong-project/share" ]; then
+            find linglong-project/share -type f -not -path "*/applications/*" | while read -r f; do
+              rel="${f#linglong-project/share/}"
+              mkdir -p "$PREFIX/share/$(dirname "$rel")"
+              cp -v "$f" "$PREFIX/share/$rel"
+            done
+          fi
+
+          echo "=== 修复文件权限 ==="
+          find "$PREFIX/sidecar" -type f -exec chmod 755 {} \; 2>/dev/null || true
+          chmod 755 "$PREFIX/bin/clash-verge" "$PREFIX/AppRun.sh" 2>/dev/null || true
+
+          echo "=== 构建结果验证 ==="
+          for f in \
+            "$PREFIX/bin/clash-verge" \
+            "$PREFIX/AppRun.sh" \
+            "$PREFIX/share/applications/$APP_ID.desktop" \
+            "$PREFIX/resources/Country.mmdb" \
+            "$PREFIX/lib/clash-verge/resources/Country.mmdb" \
+            "$PREFIX/lib/resources/Country.mmdb"; do
+            if [ -f "$f" ]; then
+              echo "✅ $f"
+            else
+              echo "❌ 缺少: $f"
+              exit 1
+            fi
+          done
+
+          if [ -f "$PREFIX/bin/verge-mihomo" ]; then
+            echo "✅ 内核: $PREFIX/bin/verge-mihomo ($(stat -c%s "$PREFIX/bin/verge-mihomo") bytes)"
+          else
+            echo "⚠️ 未找到 verge-mihomo 内核（sidecar 可能下载失败）"
+          fi
+
+          echo ""
+          echo "文件总数: $(find "$PREFIX" -type f | wc -l)"
+          echo "总大小: $(du -sh "$PREFIX" | cut -f1)"
+          echo ""
+          echo "=== 目录结构（前 60 项） ==="
+          find "$PREFIX" | sort | head -60
+          echo ""
+          echo "=========================================="
+          echo "构建成功！"
+          echo "=========================================="
+          EOF
+
+          chmod +x build.sh
+          echo "✅ build.sh 创建完成"
+
+      - name: Create linglong.yaml
+        run: |
+          set -e
+
+          cat > linglong.yaml << 'YAML_EOF'
+          version: '1'
+          package:
+            id: io.github.clash-verge-rev
+            name: Clash Verge Rev
+            version: 2.5.4.0
+            kind: app
+            description: |
+              Clash Verge Rev - A Clash Meta GUI based on Tauri
+            architecture: x86_64
+          permissions:
+            - network
+            - local_socket
+          command:
+            - /opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          base: org.deepin.base/25.2.2
+          runtime: org.deepin.runtime.gtk4/25.2.2
+          build: |
+            ./build.sh
+          YAML_EOF
+
+          echo "=== linglong.yaml ==="
+          cat linglong.yaml
+
+      - name: Build with ll-killer layer build
+        shell: bash -e {0}
+        run: |
+          set -e
+          ll-killer layer build --no-post-setup -- ./build.sh
+
+          echo "=== 构建完成，检查输出 ==="
+          if ls *.layer 2>/dev/null; then
+            echo "✅ 找到 layer 文件"
+            ls -la *.layer
+          else
+            echo "❌ 未找到 layer 文件"
+            find . -name "*.layer" -o -name "*.uab" 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Verify and list output files
+        run: |
+          set -e
+          LAYER_FILES=$(find . -name "*.layer" -not -path "./linglong/*" 2>/dev/null)
+          UAB_FILES=$(find . -name "*.uab" -not -path "./linglong/*" 2>/dev/null)
+
+          if [ -n "$LAYER_FILES" ]; then
+            echo "✅ Layer 文件:"
+            for f in $LAYER_FILES; do
+              echo "  - $(basename $f): $(stat -c%s $f) bytes"
+            done
+          fi
+          if [ -n "$UAB_FILES" ]; then
+            echo "✅ UAB 文件:"
+            for f in $UAB_FILES; do
+              echo "  - $(basename $f): $(stat -c%s $f) bytes"
+            done
+          fi
+          if [ -z "$LAYER_FILES" ] && [ -z "$UAB_FILES" ]; then
+            echo "❌ 未找到任何输出文件"
+            exit 1
+          fi
+
+      - name: Upload Linglong artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clash-verge-rev-linglong
+          path: |
+            *.layer
+            *.uab
+            linglong/output/**/*.layer
+            linglong/output/**/*.uab
+          if-no-files-found: warn
+          retention-days: 30
