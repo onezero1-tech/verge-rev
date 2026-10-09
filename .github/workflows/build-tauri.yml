@@ -1,0 +1,301 @@
+name: Build Tauri Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-tauri:
+    runs-on: ubuntu-24.04
+    container:
+      image: linuxdeepin/deepin:25
+      options: --user root --privileged
+
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "*"
+      DISPLAY: ":99"
+      GDK_BACKEND: "x11"
+
+    steps:
+      - name: Install Git (Required for submodules)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git
+          git --version
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2 \
+            libssl-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            pkg-config \
+            build-essential \
+            curl wget git unzip file binutils xvfb xauth
+
+      - name: Setup virtual display
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+          echo "Virtual display started"
+
+      - name: Install Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.13.2 --activate
+          pnpm --version
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup show active-toolchain
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Download required resources
+        shell: bash -e {0}
+        run: |
+          set -e
+          mkdir -p src-tauri/resources
+
+          GEOIP_URL="https://github.com/Dreamacro/maxmind-geoip/releases/latest/download/Country.mmdb"
+          GEOSITE_URL="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+          GEOIP_DAT_URL="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+
+          for entry in "Country.mmdb:$GEOIP_URL" "geosite.dat:$GEOSITE_URL" "geoip.dat:$GEOIP_DAT_URL"; do
+            name="${entry%%:*}"; url="${entry#*:}"
+            if [ ! -f "src-tauri/resources/$name" ] || [ "$(stat -c%s src-tauri/resources/$name)" -eq 0 ]; then
+              echo "下载 $name ..."
+              curl -fL -o "src-tauri/resources/$name" "$url"
+            fi
+            [ -f "src-tauri/resources/$name" ] && [ "$(stat -c%s src-tauri/resources/$name)" -gt 0 ] \
+              || { echo "❌ 资源文件无效: $name"; exit 1; }
+            echo "✅ $name ($(stat -c%s src-tauri/resources/$name) bytes)"
+          done
+
+      - name: Download sidecars and resources (prebuild)
+        run: |
+          set -e
+          node scripts/prebuild.mjs x86_64-unknown-linux-gnu
+          echo "=== src-tauri/sidecar/ ==="
+          ls -la src-tauri/sidecar/
+          echo "=== src-tauri/resources/ ==="
+          ls -la src-tauri/resources/ 2>/dev/null || true
+
+      - name: Build Tauri application (no bundle)
+        run: |
+          cargo tauri build --no-bundle --verbose
+          echo "=== Build output ==="
+          ls -la target/release/
+          file target/release/clash-verge
+
+      - name: Generate service install script
+        run: |
+          set -e
+          cat > target/release/clash-verge-service-install << 'EOF'
+          #!/bin/bash
+          # Clash Verge Service 安装脚本（玲珑环境占位版）
+          # 玲珑沙箱内没有 systemd 用户会话，应用检测失败后会自动回退内置模式运行内核。
+          set -e
+
+          APP_DIR="/opt/apps/io.github.clash-verge-rev/files/bin"
+          SERVICE_NAME="clash-verge-service"
+          USER_HOME="${HOME:-/home/user}"
+
+          mkdir -p "${USER_HOME}/.config/systemd/user/"
+
+          cat > "${USER_HOME}/.config/systemd/user/${SERVICE_NAME}.service" << UNIT
+          [Unit]
+          Description=Clash Verge Service
+          After=network.target
+
+          [Service]
+          Type=simple
+          ExecStart=${APP_DIR}/clash-verge-service
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=default.target
+          UNIT
+
+          systemctl --user daemon-reload || true
+          systemctl --user enable ${SERVICE_NAME} || true
+
+          echo "Clash Verge Service 安装完成"
+          EOF
+          chmod +x target/release/clash-verge-service-install
+
+      - name: Prepare linglong-project directory
+        run: |
+          set -e
+          mkdir -p linglong-project
+
+          # 主程序
+          cp target/release/clash-verge linglong-project/clash-verge
+          chmod +x linglong-project/clash-verge
+
+          # 服务二进制（如产物中存在则一并带走）
+          if [ -f target/release/clash-verge-service ]; then
+            cp target/release/clash-verge-service linglong-project/clash-verge-service
+            chmod +x linglong-project/clash-verge-service
+          fi
+
+          # 服务安装脚本
+          cp target/release/clash-verge-service-install linglong-project/clash-verge-service-install
+          chmod +x linglong-project/clash-verge-service-install
+
+          # sidecar 内核
+          cp -r src-tauri/sidecar linglong-project/sidecar 2>/dev/null || true
+
+          # 资源文件
+          if [ -d "src-tauri/resources" ]; then
+            cp -r src-tauri/resources linglong-project/resources
+            find linglong-project/resources -type f
+          fi
+
+          # 图标
+          if [ -d "src-tauri/icons" ]; then
+            cp -r src-tauri/icons linglong-project/icons
+          fi
+
+          # ========= AppRun.sh 启动脚本（重写） =========
+          cat > linglong-project/AppRun.sh << 'EOF'
+          #!/bin/bash
+          # Clash Verge Rev - 玲珑环境启动脚本
+          set -e
+
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          APP_ID="io.github.clash-verge-rev.clash-verge-rev"
+
+          # ---------- WebKit / 图形环境 ----------
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+          export GDK_BACKEND=x11
+          export DISPLAY="${DISPLAY:-:0}"
+          export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+          # 沙箱内无 GPU，强制软渲染，消除 kmsro/libEGL 报错
+          export LIBGL_ALWAYS_SOFTWARE=1
+
+          # ---------- 可执行文件 / 动态库搜索路径 ----------
+          export PATH="$DIR/bin:$DIR/sidecar:$PATH"
+          export LD_LIBRARY_PATH="$DIR/lib:$DIR/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+
+          # ---------- XDG 用户目录 ----------
+          export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+          export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+          export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+
+          APP_DATA_DIR="$XDG_DATA_HOME/$APP_ID"
+          APP_CONF_DIR="$XDG_CONFIG_HOME/$APP_ID"
+          mkdir -p "$APP_DATA_DIR" "$APP_CONF_DIR" "$XDG_CACHE_HOME/$APP_ID"
+
+          # ---------- 预置资源文件 ----------
+          for r in Country.mmdb geoip.dat geosite.dat; do
+            if [ -f "$DIR/resources/$r" ] && [ ! -f "$APP_DATA_DIR/$r" ]; then
+              cp -f "$DIR/resources/$r" "$APP_DATA_DIR/$r"
+              echo "已复制资源文件: $r"
+            fi
+          done
+
+          # ---------- 预置内核到数据目录（修复 verge-mihomo: No such file or directory） ----------
+          for c in verge-mihomo verge-mihomo-alpha; do
+            if [ ! -f "$APP_DATA_DIR/$c" ]; then
+              for src in "$DIR/bin/$c" "$DIR/sidecar/$c" "$DIR/lib/clash-verge/$c"; do
+                if [ -f "$src" ]; then
+                  cp -f "$src" "$APP_DATA_DIR/$c"
+                  chmod 755 "$APP_DATA_DIR/$c"
+                  echo "已复制内核文件: $c"
+                  break
+                fi
+              done
+            fi
+          done
+
+          # ---------- 强制关闭服务模式（使用内置/Sidecar 模式运行内核） ----------
+          force_service_off() {
+            local cfg="$1"
+            mkdir -p "$(dirname "$cfg")"
+            touch "$cfg"
+            if grep -q '^enable_service_mode:' "$cfg" 2>/dev/null; then
+              sed -i 's/^enable_service_mode:.*/enable_service_mode: false/' "$cfg"
+            else
+              printf 'enable_service_mode: false\n' >> "$cfg"
+            fi
+          }
+          force_service_off "$APP_DATA_DIR/verge.yaml"
+          force_service_off "$APP_CONF_DIR/verge.yaml"
+
+          # ---------- systemd 探测（沙箱内通常不可用 → 内置模式） ----------
+          if ! systemctl --user is-active clash-verge-service >/dev/null 2>&1; then
+            echo "提示: systemd 用户服务不可用，内核将以内置模式运行"
+            export CLASH_VERGE_NO_SERVICE=1
+          fi
+
+          # ---------- 启动主程序（位于 bin/ 子目录） ----------
+          if [ -x "$DIR/bin/clash-verge" ]; then
+            exec "$DIR/bin/clash-verge" "$@"
+          else
+            exec "$DIR/clash-verge" "$@"
+          fi
+          EOF
+          chmod +x linglong-project/AppRun.sh
+
+          # desktop 文件
+          mkdir -p linglong-project/share/applications
+          mkdir -p linglong-project/share/icons/hicolor/256x256/apps
+          cat > linglong-project/share/applications/io.github.clash-verge-rev.desktop << 'EOF'
+          [Desktop Entry]
+          Name=Clash Verge Rev
+          Comment=Clash Meta GUI
+          Exec=/opt/apps/io.github.clash-verge-rev/files/AppRun.sh
+          Icon=io.github.clash-verge-rev
+          Type=Application
+          Categories=Network;
+          Terminal=false
+          StartupNotify=true
+          EOF
+
+          # 图标
+          if [ -f linglong-project/icons/128x128.png ]; then
+            cp linglong-project/icons/128x128.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
+          elif [ -f linglong-project/icons/icon.png ]; then
+            cp linglong-project/icons/icon.png linglong-project/share/icons/hicolor/256x256/apps/io.github.clash-verge-rev.png
+          fi
+
+          echo "=== linglong-project 目录结构 ==="
+          find linglong-project -type f | sort
+
+      - name: Upload linglong-project artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linglong-project
+          path: linglong-project/
+          if-no-files-found: error
+          retention-days: 30
