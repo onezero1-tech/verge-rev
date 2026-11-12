@@ -10,7 +10,7 @@ jobs:
   build-tauri:
     runs-on: ubuntu-24.04
     container:
-      image: linuxdeepin/deepin:25a
+      image: linuxdeepin/deepin:25
       options: --user root --privileged
 
     env:
